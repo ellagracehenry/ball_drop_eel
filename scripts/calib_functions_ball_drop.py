@@ -513,7 +513,7 @@ def stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames
             cv.drawChessboardCorners(frame2, (8,11), corners2, c_ret2)
             #cv.imshow('img2', frame2)
 
-            filename1 = str(imgno) + ".jpg"
+            filename1 = str(frame1) + ".jpg"
             foldername1 = "checker_stereocam"
             folderpath1 = os.path.join(images_path1, foldername1)
             completeName1 = os.path.join(images_path1, foldername1, filename1)
@@ -523,7 +523,7 @@ def stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames
 
             cv.imwrite(completeName1,frame1)
 
-            filename2 = str(imgno) + ".jpg"
+            filename2 = str(frame2) + ".jpg"
             foldername2 = "checker_stereocam"
             folderpath2 = os.path.join(images_path2, foldername2)
             completeName2 = os.path.join(images_path2, foldername2, filename2)
