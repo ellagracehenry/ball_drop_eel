@@ -380,7 +380,7 @@ def calibrate_camera(base_path, images_folder):
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
  
         #TB: find the checkerboard
-        ret, corners = cv.findChessboardCornersSB(gray, (columns, rows), None)
+        ret, corners = cv.findChessboardCorners(gray, (columns, rows), flags=cv.CALIB_CB_ADAPTIVE_THRESH)
         imgno = imgno + 1
         #print(f"finding checker")
  
@@ -499,8 +499,8 @@ def stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames
     for frame1, frame2 in zip(c1_images, c2_images):
         gray1 = cv.cvtColor(frame1, cv.COLOR_BGR2GRAY)
         gray2 = cv.cvtColor(frame2, cv.COLOR_BGR2GRAY)
-        c_ret1, corners1 = cv.findChessboardCornersSB(gray1, (8, 11), None)
-        c_ret2, corners2 = cv.findChessboardCornersSB(gray2, (8, 11), None)
+        c_ret1, corners1 = cv.findChessboardCorners(gray1, (8, 11), flags=cv.CALIB_CB_ADAPTIVE_THRESH)
+        c_ret2, corners2 = cv.findChessboardCorners(gray2, (8, 11), flags=cv.CALIB_CB_ADAPTIVE_THRESH)
         #find paired frames that both have the checkerboard
         if c_ret1 == True and c_ret2 == True:
             count+=1

@@ -9,9 +9,9 @@ from calib_functions_ball_drop import *
 #Enter the path to the focal follow csv file.
 CSV_Path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data.xlsx"
 #Enter the path/name for your output csv file.
-Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/calib_results_trial1.xlsx"
+Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/calib_results_trial2.xlsx"
 #Path for triangulated points
-output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data_3D_trial1.xlsx"
+output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data_3D_trial2.xlsx"
 #Base path for frames
 base_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/triangulation_frames"
 
@@ -61,7 +61,7 @@ End_Col2="calib_end_time2"
 Folder_Col1="calib_1_path"
 Folder_Col2="calib_2_path"
 
-df = df[df["trial_ID"] ==11]
+df = df[df["trial_ID"] ==2]
 
 current_trial_id = None
 
@@ -97,7 +97,7 @@ for i, row in df.iterrows():
     # Check if this trial's calibration is already cached
     if trial_id in calibration_cache:
         print(f"⚙️  Reusing cached calibration for Trial {trial_id}")
-        mtx1, dist1, mtx2, dist2, R, T = calibration_cache[trial_id]
+        mtx1, dist1, mtx2, dist2, R, T, cam_distance = calibration_cache[trial_id]
 
     else:
         print(f"🧮 Performing calibration for Trial {trial_id}")
@@ -107,11 +107,11 @@ for i, row in df.iterrows():
                 base_path, video1_path, video2_path, video1_name, video2_name, start1, end1, trial_id)
 
             # Compute camera distance (you might need to adapt this)
-            # cam_distance = float(np.linalg.norm(T)) if T is not None else float('nan')
+            cam_distance = float(np.linalg.norm(T)) if T is not None else float('nan')
 
             # Store calibration results for this trial
             print(f"storing calibration results...")
-            calibration_cache[trial_id] = (mtx1, dist1, mtx2, dist2, R, T)
+            calibration_cache[trial_id] = (mtx1, dist1, mtx2, dist2, R, T, cam_distance)
 
             calibration_metrics.append({
                 "trial_id": trial_id,
@@ -121,7 +121,8 @@ for i, row in df.iterrows():
                 "dist1": dist1,
                 "dist2":dist2,
                 "R" : R,
-                "T" : T
+                "T" : T,
+                "cam_distance" : cam_distance
             })
 
         except Exception as e:
