@@ -380,7 +380,15 @@ def calibrate_camera(base_path, images_folder):
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
  
         #TB: find the checkerboard
-        ret, corners = cv.findChessboardCorners(gray, (columns, rows), flags=cv.CALIB_CB_ADAPTIVE_THRESH)
+        #ret, corners = cv.findChessboardCorners(gray, (columns, rows), flags=cv.CALIB_CB_ADAPTIVE_THRESH)
+        #print(corners)
+
+        corners_path = detect_corners_pyocamcalib(gray, chessboard_size = (8,11), camera_name = "mycam", square_size=0.03)
+        corners_list = load_corners_for_calibration(corners_path)
+        corners = convert_pyocamcalib_corners(corners_list)
+
+        ret = corners is not None and len(corners) > 0
+
         imgno = imgno + 1
         #print(f"finding checker")
  
@@ -593,3 +601,48 @@ def triangulate(mtx1, mtx2, R, T, fishpoints1, fishpoints2):
     print(p3ds)
     return np.array(p3ds)
 
+def detect_corners_pyocamcalib(working_dir, chessboard_size=(8, 11), camera_name="MyCamera", square_size=0.03):
+    """
+    Detect corners using py-OCamCalib and save them.
+    Returns the path to the saved corners file.
+    """
+    engine = CalibrationEngine(working_dir, chessboard_size, camera_name, square_size)
+    
+    # Automatic detection only (no manual GUI)
+    engine.detect_corners(check=False)
+    engine.save_detection()
+    
+    corners_path = os.path.join(working_dir, f"{camera_name}_corners.npz")
+    return corners_path
+
+def load_corners_for_calibration(corners_path):
+    """
+    Load corners from py-OCamCalib and format for OpenCV calibration.
+    Returns a list of 2D image points arrays (one per image).
+    """
+    data = np.load(corners_path, allow_pickle=True)
+    
+    # py-OCamCalib saves corners as a list of arrays
+    # Each array is shape (num_corners, 2) or (num_corners, 1, 2)
+    corners_list = []
+    for corners in data['corners_list']:
+        corners = corners.astype(np.float32)        # ensure correct dtype
+        corners = corners.reshape(-1, 1, 2)        # shape for OpenCV
+        corners_list.append(corners)
+        
+    return corners_list
+
+def convert_pyocamcalib_corners(corners_list):
+    """
+    Convert py-OCamCalib detected corners to OpenCV-compatible format for your pipeline.
+    
+    corners_list: list of arrays, each array is (num_corners, 2)
+    
+    Returns: list of arrays, each array is (num_corners, 1, 2), dtype float32
+    """
+    converted = []
+    for corners in corners_list:
+        corners = np.array(corners, dtype=np.float32)    # ensure float32
+        corners = corners.reshape(-1, 1, 2)             # shape for OpenCV
+        converted.append(corners)
+    return converted

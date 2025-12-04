@@ -129,13 +129,9 @@ for i, row in df.iterrows():
             print(f"❌ Error calibrating Trial {trial_id}: {e}")
             cam_distance = float('nan')
             # Store a placeholder to prevent retrying the failed calibration
-            calibration_cache[trial_id] = (None, None, None, None, None, None)
+            calibration_cache[trial_id] = (None, None, None, None, None, None, None)
             raise SystemExit
         
-
-    calib_df = pd.DataFrame(calibration_metrics)
-    calib_df.to_excel(Output_calib, index=False)
-    print(f"📊 Calibration metrics saved to: {Output_calib}")
   
     # Dictionary to store triangulated 3D results for this row
     triangulated_points = {}
