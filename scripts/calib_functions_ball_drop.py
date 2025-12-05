@@ -19,6 +19,9 @@ import numpy as np
 import xml.etree.ElementTree as ET
 import csv
 import pandas as pd
+import pickle
+
+from pyocamcalib.modelling.calibration import CalibrationEngine
 
 from datetime import datetime, time
 
@@ -311,9 +314,12 @@ def calibrate_camera(base_path, images_folder):
     valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
 
     images_path=os.path.join(base_path, images_folder)
-    images_names = sorted(os.listdir(images_path))
+    #images_names = sorted(os.listdir(images_path))
+
+    print(images_path)
 
     images = []
+    images_names = []
     for imname in sorted(os.listdir(images_path)):
         # skip hidden or non-image files like .DS_Store or desktop.ini
         if not imname.lower().endswith(valid_exts):
@@ -327,9 +333,11 @@ def calibrate_camera(base_path, images_folder):
             continue
 
         images.append(im)
+        images_names.append(imname)
 
         if not images:
             raise RuntimeError(f"No valid images found in {images_path}")
+        
     
     # images_path=os.path.join(base_path, images_folder)
     # images_names = os.listdir(images_path)
@@ -372,50 +380,72 @@ def calibrate_camera(base_path, images_folder):
  
     #TB: coordinates of the checkerboard in checkerboard world space.
     objpoints = [] #TB: 3d point in real world space
- 
-    imgno = 0
 
     #print(f"frame by frame")
-    for frame in images:
-        gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+    #for frame in images:
+        #gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
  
         #TB: find the checkerboard
         #ret, corners = cv.findChessboardCorners(gray, (columns, rows), flags=cv.CALIB_CB_ADAPTIVE_THRESH)
         #print(corners)
 
-        corners_path = detect_corners_pyocamcalib(gray, chessboard_size = (8,11), camera_name = "mycam", square_size=0.03)
-        corners_list = load_corners_for_calibration(corners_path)
-        corners = convert_pyocamcalib_corners(corners_list)
+    pickle_path = detect_corners_pyocamcalib(images_path, chessboard_size = (8,11), camera_name = "mycam", square_size=0.03)
+    print(f"detect corners complete")
+    corners_dict = load_corners_for_calibration(pickle_path)
+    print(f"convert corners complete")
 
-        ret = corners is not None and len(corners) > 0
+    for imgno, frame in enumerate(images, start=1):
+        gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+        image_name = images_names[imgno-1]  # match the filename
+        if image_name in corners_dict:
+            corners = corners_dict[image_name]
+            ret = True
+        else:
+            print(f"⚠️ No corners found for {image_name}")
+            ret = False
 
-        imgno = imgno + 1
+        if ret:
+           conv_size = (11, 11)
+           corners = cv.cornerSubPix(gray, corners, conv_size, (-1, -1), criteria)
+           cv.drawChessboardCorners(frame, (columns, rows), corners, ret)
+           print(f"Number of corners; {len(corners)}")
+
+           # Save annotated image
+           filename = f"{imgno}.jpg"
+           foldername = "checker_cam"
+           filepath = os.path.join(images_path, foldername)
+           os.makedirs(filepath, exist_ok=True)
+           completeName = os.path.join(filepath, filename)
+           cv.imwrite(completeName, frame)
+
+           objpoints.append(objp)
+           imgpoints.append(corners)
         #print(f"finding checker")
  
-        if ret == True:
+        # if ret == True:
  
-            #TB: Convolution size used to improve corner detection. Don't make this too large.
-            conv_size = (11, 11)
+        #     #TB: Convolution size used to improve corner detection. Don't make this too large.
+        #     conv_size = (11, 11)
  
-            #TB: opencv can attempt to improve the checkerboard coordinates
-            corners = cv.cornerSubPix(gray, corners, conv_size, (-1, -1), criteria)
-            cv.drawChessboardCorners(frame, (columns, rows), corners, ret)
-            print(f"Number of corners; {len(corners)}")
-            #cv.imshow('img', frame)
-            #cv.waitKey(500)
+        #     #TB: opencv can attempt to improve the checkerboard coordinates
+        #     corners = cv.cornerSubPix(gray, corners, conv_size, (-1, -1), criteria)
+        #     cv.drawChessboardCorners(frame, (columns, rows), corners, ret)
+        #     print(f"Number of corners; {len(corners)}")
+        #     #cv.imshow('img', frame)
+        #     #cv.waitKey(500)
 
-            filename = str(imgno) + ".jpg"
-            foldername = "checker_cam"
-            filepath = os.path.join(images_path, foldername)
-            completeName = os.path.join(images_path, foldername, filename)
+        #     filename = str(imgno) + ".jpg"
+        #     foldername = "checker_cam"
+        #     filepath = os.path.join(images_path, foldername)
+        #     completeName = os.path.join(images_path, foldername, filename)
 
-            if not os.path.exists(filepath):
-               os.makedirs(filepath)
+        #     if not os.path.exists(filepath):
+        #        os.makedirs(filepath)
 
-            cv.imwrite(completeName,frame)
+        #     cv.imwrite(completeName,frame)
  
-            objpoints.append(objp)
-            imgpoints.append(corners)
+        #     objpoints.append(objp)
+        #     imgpoints.append(corners)
  
  
  
@@ -610,27 +640,35 @@ def detect_corners_pyocamcalib(working_dir, chessboard_size=(8, 11), camera_name
     
     # Automatic detection only (no manual GUI)
     engine.detect_corners(check=False)
-    engine.save_detection()
-    
-    corners_path = os.path.join(working_dir, f"{camera_name}_corners.npz")
-    return corners_path
 
-def load_corners_for_calibration(corners_path):
+    # Get the filename used by py-OCamCalib
+    now = datetime.now()
+    dt_string = now.strftime("%d%m%Y_%H%M%S")
+    pickle_path = os.path.join(working_dir, f'detections_{camera_name}_{dt_string}.pickle')
+
+    pickle_path = engine.save_detection()
+    
+    return pickle_path
+
+def load_corners_for_calibration(corners_file):
     """
     Load corners from py-OCamCalib and format for OpenCV calibration.
     Returns a list of 2D image points arrays (one per image).
     """
-    data = np.load(corners_path, allow_pickle=True)
-    
-    # py-OCamCalib saves corners as a list of arrays
-    # Each array is shape (num_corners, 2) or (num_corners, 1, 2)
-    corners_list = []
-    for corners in data['corners_list']:
-        corners = corners.astype(np.float32)        # ensure correct dtype
-        corners = corners.reshape(-1, 1, 2)        # shape for OpenCV
-        corners_list.append(corners)
+    # Load the pickle file
+    with open(corners_file, "rb") as f:
+        data = pickle.load(f)
+
+    corners_dict = {}
+
+    for key in data:
+        filename = os.path.basename(key) 
+        image_points = np.asarray(data[key]['image_points'], dtype = np.float32)        # ensure correct dtype
+        if image_points.ndim == 2:
+           image_points = image_points.reshape(-1,1,2)
+        corners_dict[filename] = image_points
         
-    return corners_list
+    return corners_dict
 
 def convert_pyocamcalib_corners(corners_list):
     """
