@@ -96,9 +96,6 @@ def cam_calibration(base_path, left_cal_vid, right_cal_vid, left_cal, right_cal,
     fps = get_frame_rate(left_cal_mp4)
     fps_r=get_frame_rate(right_cal_mp4)
 
-    print(fps)
-    print(fps_r)
-
     # Check frame rates are consistent
     if not fps == fps_r:
         print("Videos recorded with different fps, quitting")
@@ -440,15 +437,6 @@ def calibrate_camera(base_path, images_folder):
  
             #TB: opencv can attempt to improve the checkerboard coordinates
             corners = cv.cornerSubPix(gray, corners, conv_size, (-1, -1), criteria)
-
-            board_width_px  = corners[:, 0, 0].ptp()
-            board_height_px = corners[:, 0, 1].ptp()
-
-            if board_width_px < 200 or board_height_px < 200:
-                print(f"⚠️ Skipping frame {i}: checkerboard too small "
-                      f"({board_width_px:.1f}×{board_height_px:.1f}px)")
-                continue
-
             cv.drawChessboardCorners(frame, (columns,rows), corners, ret)
             print(f"Number of corners; {len(corners)}")
             #cv.imshow('img', frame)
@@ -464,7 +452,7 @@ def calibrate_camera(base_path, images_folder):
 
             cv.imwrite(completeName,frame)
  
-            objpoints.append(objp.copy())
+            objpoints.append(objp)
             imgpoints.append(corners)
 
 
@@ -546,7 +534,7 @@ def calibrate_camera_interactive(base_path, images_folder):
     width, height = images[0].shape[1], images[0].shape[0]
 
     criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-    conv_size = (1, 1)
+    conv_size = (5, 5)
 
     objpoints = []
     imgpoints = []
@@ -837,9 +825,6 @@ def stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames
     c1_images_names = sorted(os.listdir(images_path1))
     c2_images_names = sorted(os.listdir(images_path2))
 
-    print(c1_images_names[:5])
-    print(c2_images_names[:5])
-
     # valid image extensions
     valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
 
@@ -910,14 +895,6 @@ def stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames
             corners1 = cv.cornerSubPix(gray1, corners1, (5,5), (-1, -1), criteria)
             corners2 = cv.cornerSubPix(gray2, corners2, (5,5), (-1, -1), criteria)
             
-            bw1 = corners1[:,0,0].ptp()
-            bh1 = corners1[:,0,1].ptp()
-            bw2 = corners2[:,0,0].ptp()
-            bh2 = corners2[:,0,1].ptp()
-
-            if min(bw1, bh1, bw2, bh2) < 200:
-                continue
-            
             cv.drawChessboardCorners(frame1, (columns,rows), corners1, c_ret1)
             #cv.imshow('img', frame1)
  
@@ -944,11 +921,11 @@ def stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames
 
             cv.imwrite(completeName2,frame2)
  
-            objpoints.append(objp.copy())
+            objpoints.append(objp)
             imgpoints_left.append(corners1)
             imgpoints_right.append(corners2)
  
-    stereocalibration_flags = 0
+    stereocalibration_flags = (cv.CALIB_FIX_K3 | cv.CALIB_ZERO_TANGENT_DIST)
     
 
 
@@ -1027,7 +1004,7 @@ def stereo_calibrate_accept_interactive(
         0.001
     )
 
-    flags = cv.CALIB_FIX_INTRINSIC
+    flags = cv.CALIB_FIX_INTRINSIC | cv.CALIB_FIX_K3 | cv.CALIB_ZERO_TANGENT_DIST
 
     ret, CM1, dist1_out, CM2, dist2_out, R, T, E, F = cv.stereoCalibrate(
         objpoints,

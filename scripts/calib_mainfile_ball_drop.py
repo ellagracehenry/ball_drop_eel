@@ -7,11 +7,11 @@ from calib_functions_ball_drop import *
 
 ##################################################################################################USER EDITS START HERE################################################################################################
 #Enter the path to the focal follow csv file.
-CSV_Path="/Users/ellag/Downloads/ball_drop_data.xlsx"
+CSV_Path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data.xlsx"
 #Enter the path/name for your output csv file.
-Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/calib_results_trial2.xlsx"
+Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/calib_results_trial1.xlsx"
 #Path for triangulated points
-output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data_3D_trial2.xlsx"
+output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data_3D_trial10.xlsx"
 #Base path for frames
 base_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/triangulation_frames"
 
@@ -61,7 +61,7 @@ End_Col2="calib_end_time2"
 Folder_Col1="calib_1_path"
 Folder_Col2="calib_2_path"
 
-df = df[df["trial_ID"] ==2]
+df = df[df["trial_ID"] == 13]
 
 current_trial_id = None
 
@@ -152,7 +152,7 @@ for i, row in df.iterrows():
                 pts_R = np.array([[x2, y2]], dtype=float)
 
                 # Triangulate single 3D point
-                point_3D = triangulate(mtx1, mtx2, R, T, pts_L, pts_R)
+                point_3D = triangulate(mtx1, mtx2, dist1, dist2, R, T, pts_L, pts_R)
 
                 # If your triangulate() returns Nx3 array, extract the first element
                 point_3D = point_3D[0] if len(point_3D.shape) > 1 else point_3D

@@ -7,11 +7,11 @@ library(tidyr)
 library(purrr)
 
  
-setwd("~/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment")
+setwd("/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/")
 
 #load in data
-data <- read_excel("master_ball_drop_3D.xlsx") %>%
-  filter(!drop_ID %in% c(131))
+data <- read_excel("master_ball_drop_data_3D_0121.xlsx") %>%
+  filter(!drop_ID %in% c(152,169))
 
   
 
@@ -31,6 +31,7 @@ data <- data %>%
 coordsave <- data %>%
   group_by(colony, trial_ID, eel_ID) %>%
   summarise(avg_x = mean(base_X, na.rm = TRUE), avg_y = mean(base_Y, na.rm = TRUE), avg_z = mean(base_Z, na.rm = TRUE))
+
 
 distance_wide <- coordsave %>%
   group_by(trial_ID) %>%
@@ -144,9 +145,10 @@ coordsave <- coordsave %>%
 data$colony_size[data$colony == "S5"] <- 34
 data$colony_size[data$colony == "S9"] <- 59
 data$colony_size[data$colony == "S15"] <- 67
+data$colony_size[data$colony == "S12"] <- 26
 
 
-data$colony <- factor(data$colony, levels = c("S5","S9", "S15"))
+data$colony <- factor(data$colony, levels = c("S12","S5","S9", "S15"))
 
 #12. Prop inst emergerd
 prop_inst_emerged <- data$inst_emerged/data$colony_size
@@ -173,9 +175,12 @@ data %>%
 min(data$distance_to_ball, na.rm = TRUE)
 
 model <- glm(binary_response ~ distance_to_ball, data = data, family = binomial)
-
+summary(model)
 glm(binary_response ~ )
 
+model <- glmer(success ~ predictor + (1 | random_effect), 
+               data = mydata, 
+               family = binomial)
 
 data$trial_ID <- as.factor(data$trial_ID)
 ggplot(data, aes(x = distance_to_ball, y = binary_response, color = trial_ID)) +
@@ -196,17 +201,17 @@ hist(data$inst_emerged)
 
 range <- (max(data$inst_emerged)-min(data$inst_emerged))
 
-small <- c(1,14)
-low <- c(15,26)
-medium <- c(27,38)
+small <- c(1,35)
+low <- c(18,35)
+medium <- c(36,54)
 high <- c(39,51)
 
 data <- data %>%
   mutate(bin_inst_emerged = case_when(
     inst_emerged >= small[1] & inst_emerged <= small[2] ~ "lowest",
-    inst_emerged >= low[1] & inst_emerged <= low[2] ~ "low",
+    #inst_emerged >= low[1] & inst_emerged <= low[2] ~ "low",
     inst_emerged >= medium[1] & inst_emerged <= medium[2] ~ "medium",
-    inst_emerged >= high[1] & inst_emerged <= high[2] ~ "high",
+    #inst_emerged >= high[1] & inst_emerged <= high[2] ~ "high",
     TRUE ~ NA_character_
   ))
 
@@ -400,10 +405,11 @@ data <- data %>%
   mutate(response_lag = if (all(is.na(response_frame_cam1))) {
     NA_real_
     } else {
-      response_frame_cam1 - min(response_frame_cam1, na.rm = TRUE)
+      response_frame_cam1 - min(ball_hit_frame_cam1, na.rm = TRUE)
     }) %>%
   ungroup()
 
+#DISTANCE TO FIRST RESPONDER
 data_processed <- data %>%
   group_by(drop_ID) %>%
   # Identify first responder per drop (if any)
@@ -432,7 +438,8 @@ data_processed <- data %>%
 data_processed %>%
   filter(is.na(response_lag) == FALSE) %>%
   filter(full_partial_none != 0) %>%
-  ggplot(aes(x = distance_to_ball, y = response_lag, color = colony)) +
+  #filter(response_lag < 0) %>%
+  ggplot(aes(x = dist_from_first_resp, y = response_lag, color = colony)) + #CHANGE THIS FROM DISTANCE_TO_BALL TO DISTANCE_FROM_FIRST_RESP
   geom_point(alpha = 0.8) +
   stat_smooth(method = "lm", se = TRUE)+
   facet_wrap(~colony) +
@@ -470,12 +477,171 @@ bysfitHxL <- ulam(
 )
 
 
+#Cascade extent
+#Histogram of Cascade Extent
+
+cascade_summary <- data %>%
+  group_by(drop_ID) %>%
+  mutate(is_responder = full_partial_none == 2) %>%
+  summarise(
+    cascade_size = sum(is_responder, na.rm = TRUE),
+    
+    ## ---- First responder (earliest non-NA response) ----
+    first_x = {
+      idx <- is_responder & !is.na(response_frame_cam1)
+      if (!any(idx)) NA_real_
+      else base_X[idx][which.min(response_frame_cam1[idx])]
+    },
+    
+    first_y = {
+      idx <- is_responder & !is.na(response_frame_cam1)
+      if (!any(idx)) NA_real_
+      else base_Y[idx][which.min(response_frame_cam1[idx])]
+    },
+    
+    first_z = {
+      idx <- is_responder & !is.na(response_frame_cam1)
+      if (!any(idx)) NA_real_
+      else base_Z[idx][which.min(response_frame_cam1[idx])]
+    },
+    
+    ## ---- Furthest responder from first responder ----
+    social_cascade_extent =
+      if (!is.na(first_x))
+        max(
+          sqrt(
+            (base_X[is_responder] - first_x)^2 +
+              (base_Y[is_responder] - first_y)^2 +
+              (base_Z[is_responder] - first_z)^2
+          ),
+          na.rm = TRUE
+        )
+    else NA_real_,
+    
+    ## ---- Furthest responder from ball ----
+    furthest_from_ball =
+      if (!is.na(first_x))
+        max(
+          sqrt(
+            (base_X[is_responder] - first(ball_hit_X))^2 +
+              (base_Y[is_responder] - first(ball_hit_Y))^2 +
+              (base_Z[is_responder] - first(ball_hit_Z))^2
+          ),
+          na.rm = TRUE
+        )
+    else NA_real_,
+    
+    ## ---- Max possible extent from first responder (all eels) ----
+    max_possible_extent_from_first_responder =
+      if (!is.na(first_x))
+        max(
+          sqrt(
+            (base_X - first_x)^2 +
+              (base_Y - first_y)^2 +
+              (base_Z - first_z)^2
+          ),
+          na.rm = TRUE
+        )
+    else NA_real_,
+    
+    ## ---- Max possible extent from ball (all eels) ----
+    max_possible_extent_from_ball =
+      if (!is.na(first_x))
+        max(
+          sqrt(
+            (base_X - ball_hit_X)^2 +
+              (base_Y - ball_hit_Y)^2 +
+              (base_Z - ball_hit_Z)^2
+          ),
+          na.rm = TRUE
+        )
+    else NA_real_,
+    
+    ## ---- Normalised metrics ----
+    social_cascade_extent_norm =
+      if (!is.na(max_possible_extent_from_first_responder) && max_possible_extent_from_first_responder > 0)
+        social_cascade_extent / max_possible_extent_from_first_responder
+    else NA_real_,
+    
+    furthest_from_ball_norm =
+      if (!is.na(max_possible_extent_from_ball) && max_possible_extent_from_ball > 0)
+        furthest_from_ball / max_possible_extent_from_ball
+    else NA_real_,
+    colony = first(colony),
+    colony_size = first(colony_size),
+    trial_ID = first(trial_ID),
+    inst_emerged = first(inst_emerged),
+    dist_to_ball = min(distance_to_ball, na.rm = TRUE)
+  )
 
 
-lm = lm(response_lag ~ distance_to_ball*colony_size + inst_emerged, data = data)
-summary(lm)
-#Colony size
+data <- data %>%
+  left_join(cascade_summary, by = "drop_ID")
 
-ggp
+data %>%
+  distinct(
+    drop_ID,
+    inst_emerged,
+    social_cascade_extent,
+    furthest_from_ball,
+    social_cascade_extent_norm,
+    furthest_from_ball_norm,
+    colony,
+    trial_ID,
+    cascade_size
+  ) %>%
+  ggplot(aes(
+    x = inst_emerged,
+    y = furthest_from_ball_norm,
+    color = colony
+  )) +
+  geom_point() +
+  labs(
+    x = "Number of eels emerged before drop",
+    y = "Normalised cascade extent"
+  ) +
+  facet_wrap(~ colony) +
+  theme_minimal()
 
-  
+cascade_summary %>%
+  ggplot(aes(x=social_cascade_extent_norm)) +
+  geom_histogram(binwidth = 0.2, fill = "steelblue", color = "white", alpha = 0.8) +
+  labs(
+    x = "Cascade extent normalised",
+    y = "Frequency"
+  ) +
+  facet_wrap(~colony)+
+  theme_minimal()
+
+ggplot(cascade_summary, aes(x = inst_emerged, y = social_cascade_extent_norm)) +
+geom_point(size = 2, alpha = 0.7) +
+geom_smooth(method = "lm", se = TRUE, color = "darkgreen") +
+labs(
+x = "Number of eels emerged before stimulus",
+y = "Norm social cascade distance",
+title = "Norm cascade distance vs number of emerged eels"
+) +
+theme_minimal()
+
+#Response likelihood predicted by distance from ball, how many emerged at start, overall colony size, random effects of colony ID, trial_ID, drop_ID, eel ID
+data$distance_to_ball_z <- scale(data$distance_to_ball)
+data$colony_size_z <- scale(data$colony_size)
+model_response <- glmer(binary_response ~ distance_to_ball_z + inst_emerged + colony_size_z + (1|trial_ID) + (1|drop_ID) + (1|eel_ID), data = data, family = binomial(link = "logit"))
+summary(model_response)
+
+#Time lag to respond (define as time from start, time from first responder, time from ball? time from ball drop I think.), predicted by distance to ball, distance from first responder, inst emerged, colony size
+data_no_first_resp <- data_processed %>%
+  filter(dist_from_first_resp > 0)
+model_lag <- lmer(response_lag ~ distance_to_ball*dist_from_first_resp + inst_emerged + colony_size + (1|trial_ID) + (1|drop_ID) + (1|eel_ID), data = data_no_first_resp)
+summary(model_lag)
+
+#Normalised cascade extent (define as from ball or from first individual?) predicted by number of eels emerged, average distance of ball to all emerger
+model_extent <- lmer(social_cascade_extent_norm ~ colony_size + inst_emerged + dist_to_ball + (1|trial_ID), data = cascade_summary)
+
+summary(model_extent)
+#Normalised cascade size
+model_size <- lmer(cascade_size/inst_emerged ~colony_size + inst_emerged + dist_to_ball + (1|trial_ID), data = cascade_summary)
+summary(model_size)
+
+
+
