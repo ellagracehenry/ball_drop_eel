@@ -94,70 +94,34 @@ initator_responder$colony_eel_ID <- as.factor(initator_responder$colony_eel_ID)
 intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony) + (1 | colony_eel_ID), family = binomial, data = initator_responder)
 summary(intercepts_random_model)
 
-#extract intercept
-beta_start <- as.numeric(fixef(intercepts_random_model)) 
-#Extract variance
-vc <- VarCorr(intercepts_random_model)
-var_colony     <- as.numeric(attr(vc[["colony"]],     "stddev")^2)
-var_colony_eel   <- as.numeric(attr(vc[["colony_eel_ID"]],"stddev")^2)
-var_start <- c(var_colony, var_colony_eel)
+#test model
+test_model <- glmmLasso(
+  fix = second_responder ~ dist_from_first_resp + distance_to_ball,
+  rnd = list(colony = ~1, colony_eel_ID = ~1),
+  family = binomial(),
+  data = initator_responder,
+  lambda = 2
+  # no control/start - uses defaults
+)
 
-predictors <- c("dist_from_first_resp", "distance_to_ball")
-start_vec <- c(beta_start, rep(0, length(predictors)), var_start)
-# Length should be: 1 (intercept) + 2 (fixed slopes) + 2 (variances) = 5
-cat("start_vec length:", length(start_vec), "\n")
-cat("start_vec:", start_vec, "\n")
+summary(test_model)
 
 #Scan over a range of lambdas
 lambda_grid <- seq(1,3,by=1)
+#Scan over a range of lambdas
+lambda_grid <- seq(0.5,10,by=0.5)
 
-#Fit model for lambda
+#Fit model for lambda using default starting values
 models <- lapply(lambda_grid, function(lambda) {
        glmmLasso(
              fix = second_responder ~ dist_from_first_resp + distance_to_ball,  # full model formula
              rnd = list(colony = ~1, colony_eel_ID = ~1),
              family = binomial(),
              data = initator_responder,
-             lambda = lambda,
-             control = list(start = start_vec, center =TRUE)
+             lambda = lambda
          )
    })
 
-
-#test model
-test_model <- glmmLasso(
-       fix = second_responder ~ dist_from_first_resp + distance_to_ball,
-       rnd = list(colony = ~1, colony_eel_ID = ~1),
-       family = binomial(),
-       data = initator_responder,
-       lambda = 2
-       # no control/start - uses defaults
-     )
-
-summary(test_model)
-
-#create start vec
-start_vec = c(-1.46791, -0.70054, -0.16184, 0.3876931, 0.509688)
-
-#Scan over a range of lambdas
-lambda_grid <- seq(0.5,10,by=0.5)
-
-#Fit model for lambda
-models <- lapply(lambda_grid, function(lambda) {
-  glmmLasso(
-    fix = second_responder ~ dist_from_first_resp + distance_to_ball,  # full model formula
-    rnd = list(colony = ~1, colony_eel_ID = ~1),
-    family = binomial(),
-    data = initator_responder,
-    lambda = lambda,
-    control = list(start = start_vec, center =TRUE)
-  )
-})
-
-
-
-
-glmmLasso(fix = second_responder ~ dist_from_first_resp, data = initator_responder_clean, lambda = 1, family = binomial())
 
 #extract deviance:
 deviances <- sapply(models, function(m) {m$deviance})
