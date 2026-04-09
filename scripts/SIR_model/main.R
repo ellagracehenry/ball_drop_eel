@@ -228,14 +228,17 @@ summary(fr_model)
 #2 - Second responder model
 sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
 summary(sr_model)
+sr_intercept <- as.numeric(fixef(sr_model)[1])
+sr_b_dist_first <- as.numeric(fixef(sr_model)[2])
+
 
 #3 - Any responder model
 ar_model <- glmer(binary_response ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(ar_model)
 
 # Fixed effects
-intercept <- as.numeric(fixef(fr_model)[1])  # gives β₀ and β_distance
-b_dist <- as.numeric(fixef(fr_model)[2]) 
+fr_intercept <- as.numeric(fixef(fr_model)[1])  # gives β₀ and β_distance
+fr_b_dist <- as.numeric(fixef(fr_model)[2]) 
 
 # Random effects
 re_colony_colony_eel_ID <- ranef(fr_model)$'colony_eel_ID:colony'
@@ -254,12 +257,91 @@ re_colony$combo <- rownames(re_colony)
 n_drops <- length(unique(data$drop_ID))
 
 #weight strengths... come back to this
+weight_strengths <- vector(mode="list", length = length(unique(data$colony)))
+
 for (c in 1:length(unique(data$colony))) {
-  data %>%
-    filter(unique(data$colony)[1] == colony) %>%
-    group_by(colony_eel_ID) %>%
-    mutate()
-} 
+  
+  #filter out that colony data
+  data_colony <- data %>%
+    filter(colony == unique(data$colony)[c])
+  
+  # get the full set of eel IDs for this colony
+  all_eels <- unique(data_colony$colony_eel_ID)
+  
+  trial_distances <- vector(mode="list", length = length(unique(data_colony$trial_ID)))
+  
+  #for each trial
+  for (t in 1:length(unique(data_colony$trial_ID))) {
+    
+    #average eel position per trial
+    data_coords <- data_colony %>%
+      filter(trial_ID == unique(data_colony$trial_ID)[t]) %>%
+      group_by(colony_eel_ID) %>%
+      summarise(avg_x = mean(base_X, na.rm=TRUE), avg_y = mean(base_Y, na.rm=TRUE), avg_z = mean(base_Z, na.rm=TRUE))
+    
+    #name the rownames the eel_ID
+    coords <- data_coords[, c("avg_x", "avg_y", "avg_z")]
+    rownames(coords) <- data_coords$colony_eel_ID
+    
+    #transform into distance matrix
+    dist_mat <- as.data.frame(as.matrix(dist(coords)))
+    
+    # pad with NA rows/cols for eels absent in this trial
+    missing_eels <- setdiff(all_eels, rownames(dist_mat))
+    
+    if (length(missing_eels) > 0) {
+      # add NA rows for missing eels
+      na_rows <- as.data.frame(matrix(NA, nrow = length(missing_eels), ncol = ncol(dist_mat),
+                                      dimnames = list(missing_eels, colnames(dist_mat))))
+      dist_mat <- rbind(dist_mat, na_rows)
+      
+      # add NA cols for missing eels
+      na_cols <- as.data.frame(matrix(NA, nrow = nrow(dist_mat), ncol = length(missing_eels),
+                                      dimnames = list(rownames(dist_mat), missing_eels)))
+      dist_mat <- cbind(dist_mat, na_cols)
+    }
+    
+    # reorder rows and cols to consistent order across trials
+    dist_mat <- dist_mat[all_eels, all_eels]
+    
+    trial_distances[[t]] <- dist_mat
+  }
+  
+  # sum up distances across trials
+  trial_distances_sum <- Reduce(
+    function(x, y) {
+      res <- x
+      res[!is.na(y)] <- ifelse(is.na(x[!is.na(y)]), y[!is.na(y)], x[!is.na(y)] + y[!is.na(y)])
+      res
+    },
+    trial_distances
+  )
+  
+  trial_distances_count <- Reduce(
+    function(x, y) x + (!is.na(y)),
+    trial_distances,
+    accumulate = FALSE,
+    init = matrix(0, nrow = nrow(trial_distances[[1]]), ncol = ncol(trial_distances[[1]]),
+                  dimnames = dimnames(trial_distances[[1]]))
+  )
+  
+  # pairs that were NA in *all* trials stay NA
+  trial_distances_mean <- trial_distances_sum / trial_distances_count
+  trial_distances_mean[trial_distances_count == 0] <- NA
+  
+  trial_distances_mean <- apply(trial_distances_mean, 
+                                c(1,2), 
+                                function(x) {
+                                  if (!is.na(x)) {
+                                    1/(1+exp(-sr_intercept-(sr_b_dist_first*x)))
+                                    } else { 
+                                      NA }
+                                  })
+  
+  weight_strengths[[c]] <- trial_distances_mean
+}
+
+
 #Threshold strengths
 theta <- runif(n_eels)
 
@@ -273,35 +355,37 @@ max(ranges$range)
 max_rate <- 60
 dt <- 1/60
 da <- 1/60
-threshold <-1
+threshold <- 0.001
 tm <- 10
 
 #2 - simulating the cascade at each drop 
-for (i in 1:n_drops) {
+for (i in unique(data$drop_ID)) {
   print(i)
   
   #Calculate which individuals are emerged 
   drop_data <- data %>%
     filter(drop_ID == i & !is.na(full_partial_none) & !is.na(dist_from_first_resp))
   
-  drop_eel_IDs <- unique(drop_data$eel_ID)
+  drop_eel_IDs <- unique(drop_data$colony_eel_ID)
   
   resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
   
+  colony_idx <- which(unique(data$colony) == first(drop_data$colony))
+  
   
   #determine first responder
-  for (j in 1:length(drop_eel_IDs)) {
+  for (h in 1:length(drop_eel_IDs)) {
     l_drop_ID <- first(drop_data$drop_ID)
-    l_colony_eel_ID <- drop_data$colony_eel_ID[j]
+    l_colony_eel_ID <- drop_data$colony_eel_ID[h]
     l_date <- first(drop_data$date)
     l_colony <- first(drop_data$colony)
     #for each eel i in drop j nested in colony k, compute the linear predictor
-    eta_j <- intercept + b_dist*(drop_data$distance_to_ball[j]) + re_drop_ID$"(Intercept)"[re_drop_ID$combo == l_drop_ID] + re_colony_colony_eel_ID$"(Intercept)"[as.character(re_colony_colony_eel_ID$name) == l_colony_eel_ID] + re_date$"(Intercept)"[re_date$combo == l_date] + re_colony$"(Intercept)"[re_colony$combo == l_colony]
+    eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + re_drop_ID$"(Intercept)"[re_drop_ID$combo == l_drop_ID] + re_colony_colony_eel_ID$"(Intercept)"[as.character(re_colony_colony_eel_ID$name) == l_colony_eel_ID] + re_date$"(Intercept)"[re_date$combo == l_date] + re_colony$"(Intercept)"[re_colony$combo == l_colony]
     #convert this to a standard logistic transform - gives probability per eel
     p_respond <- 1/(1+exp(-eta_j))
-    resp_data[j,1] <- l_colony_eel_ID
-    resp_data[j,2] <- p_respond
-    resp_data[j,3] <- rbinom(n = 1, size = 1, prob = p_respond)
+    resp_data[h,1] <- l_colony_eel_ID
+    resp_data[h,2] <- p_respond
+    resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_respond)
   }
   
   #if there is a first responder
@@ -327,14 +411,18 @@ for (i in 1:n_drops) {
     frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs))
   
     #for each time step 
-    for (k in 2:50) {
+    for (k in 2:10) {
       K <- sum(state_matrix[,k-1] == "s")
       for (j in 1:length(drop_eel_IDs)) {
+        focal_eel_ID <- drop_eel_IDs[j]
         if (state_matrix[j,k-1] == "i") { #if eel has already hid
           dosage_matrix[j] <- NA #state and frame recorder matrices stay the same
           state_matrix[j,k] <- "i" #for now, eventually change to recovered 
         } else { #eel is susceptible to hide
           #for the last x time steps
+          dosage_matrix[j] <- 0
+          
+          tm <- 5
           
           if (k < tm) {
             tm <- k - 1
@@ -345,6 +433,9 @@ for (i in 1:n_drops) {
             inf_idx <- which(state_matrix[,t] == "i")
             #for each eel that responded in previous time step, calculate dose
             for (l in inf_idx) {
+              buddy_eel_ID <- drop_eel_IDs[l]
+              wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
+              
               if (rbinom(1,1,wij*max_rate*dt) == 1) { #wij[l,j]
                 dosage_matrix[j] <- dosage_matrix[j] + da
               } else {
@@ -356,15 +447,15 @@ for (i in 1:n_drops) {
             cuml_dose_norm <- dosage_matrix[j]/K
             
           #if exceeds threshold, individual becomes activated and flips in next state matrix 
-          if (dosage_matrix[j] > threshold) {
+          if (cuml_dose_norm > threshold) {
             state_matrix[j,k] <- "i"
             frame_recorder_matrix[j] <- k 
             dosage_matrix[j] <- NA
           } else {
             state_matrix[j,k] <- "s"
-            dosage_matrix[j] <- 0
             
           }
+            
         }
         
       }
