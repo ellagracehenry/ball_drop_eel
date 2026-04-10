@@ -403,8 +403,8 @@ for (i in unique(data$drop_ID)) {
     
     #create dosage matrix 
     dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
-    dosage_matrix[fr_idx,1] <- NA
-    dosage_matrix[-fr_idx,1] <- 0
+    dosage_matrix[fr_idx,] <- NA
+    dosage_matrix[-fr_idx,] <- 0
     
     #calculate dosage from first responders
     for (z in fr_ID) {
@@ -413,8 +413,8 @@ for (i in unique(data$drop_ID)) {
         if (state_matrix[j,1] == "i") {
           dosage_matrix[j,1] <- NA
         } else {
-          wij <- weight_strengths[[colony_idx]][focal_eel_ID, fr_ID]
-          if (rbinom(1,1,wij*max_rate*dt) == 1) {
+          wij <- weight_strengths[[colony_idx]][focal_eel_ID, z]
+          if (rbinom(1,1,wij*max_rate*dt)== 1) {
             dosage_matrix[j,1] <- dosage_matrix[j,1] + da
           } else {
             
@@ -432,69 +432,59 @@ for (i in unique(data$drop_ID)) {
       K <- sum(state_matrix[,k-1] == "s")
       for (j in 1:length(drop_eel_IDs)) {
         focal_eel_ID <- drop_eel_IDs[j]
+        
+        #Assigning states
         if (state_matrix[j,k-1] == "i") { #if eel has already hid
-          dosage_matrix[j] <- NA #state and frame recorder matrices stay the same
+          dosage_matrix[j,k] <- NA #state and frame recorder matrices stay the same
           state_matrix[j,k] <- "i" #for now, eventually change to recovered 
         } else { #eel is susceptible to hide
           #calculate cumulative for the last x time steps
           #dosage_matrix[j] <- 0
           
-          
-          
-          
-          
-          
+          #choose to hide based on dosage from the last tm steps
           
           tm <- 5
           
-          if (k < tm) {
+          if (k < tm+1) {
             tm <- k - 1
           } 
           
+          cuml_dose <- 0
           for (t in (k-tm):(k-1)) {
-            dosage_matrix
-            
-            
-            
-            inf_idx <- which(state_matrix[,t] == "i")
-            #for each eel that responded in previous time step, calculate dose
-            for (l in inf_idx) {
-              buddy_eel_ID <- drop_eel_IDs[l]
-              wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
-              
-              if (rbinom(1,1,wij*max_rate*dt) == 1) { #wij[l,j]
-                dosage_matrix[j] <- dosage_matrix[j] + da
-              } else {
-                }
-            }
-            
+            cuml_dose <- dosage_matrix[j,t] + cuml_dose
           }
           
-            cuml_dose_norm <- dosage_matrix[j]/K
-            
-          #if exceeds threshold, individual becomes activated and flips in next state matrix 
-          if (cuml_dose_norm > threshold) {
+          norm_cuml_dose <- cuml_dose/K
+          
+          if (norm_cuml_dose > threshold) {
             state_matrix[j,k] <- "i"
-            frame_recorder_matrix[j] <- k 
-            dosage_matrix[j] <- NA
+            frame_recorder_matrix[j] <- k
+            
+            #dose everyone else
+            for (jj in 1:length(drop_eel_IDs)) {
+              buddy_eel_ID <- drop_eel_IDs[jj]
+              wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
+              
+              if (rbinom(1,1,wij*max_rate*dt) == 1) {
+                dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
+              } else {
+                
+              }
+            }
+          
           } else {
             state_matrix[j,k] <- "s"
-            
+            dosage_matrix[j,k] <- dosage_matrix[j,k]
           }
-            
         }
-        
       }
       
-      #if (n_changes == 0) break
     }
-      
-      
-  } else {
-    
   }
-
 }
+        
+
+
 
 
 
