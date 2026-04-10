@@ -402,9 +402,27 @@ for (i in unique(data$drop_ID)) {
     state_matrix[-fr_idx,1] <- "s"
     
     #create dosage matrix 
-    dosage_matrix <- matrix(nrow=length(drop_eel_IDs))
+    dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
     dosage_matrix[fr_idx,1] <- NA
     dosage_matrix[-fr_idx,1] <- 0
+    
+    #calculate dosage from first responders
+    for (z in fr_ID) {
+      for (j in 1:length(drop_eel_IDs)) {
+        focal_eel_ID <- drop_eel_IDs[j]
+        if (state_matrix[j,1] == "i") {
+          dosage_matrix[j,1] <- NA
+        } else {
+          wij <- weight_strengths[[colony_idx]][focal_eel_ID, fr_ID]
+          if (rbinom(1,1,wij*max_rate*dt) == 1) {
+            dosage_matrix[j,1] <- dosage_matrix[j,1] + da
+          } else {
+            
+          }
+        }
+      }
+    }
+    
     
     #create a frame recorder matrix
     frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs))
@@ -418,8 +436,14 @@ for (i in unique(data$drop_ID)) {
           dosage_matrix[j] <- NA #state and frame recorder matrices stay the same
           state_matrix[j,k] <- "i" #for now, eventually change to recovered 
         } else { #eel is susceptible to hide
-          #for the last x time steps
-          dosage_matrix[j] <- 0
+          #calculate cumulative for the last x time steps
+          #dosage_matrix[j] <- 0
+          
+          
+          
+          
+          
+          
           
           tm <- 5
           
@@ -428,7 +452,10 @@ for (i in unique(data$drop_ID)) {
           } 
           
           for (t in (k-tm):(k-1)) {
-            #Which eels responded in previous time step
+            dosage_matrix
+            
+            
+            
             inf_idx <- which(state_matrix[,t] == "i")
             #for each eel that responded in previous time step, calculate dose
             for (l in inf_idx) {
