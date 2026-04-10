@@ -231,7 +231,6 @@ summary(sr_model)
 sr_intercept <- as.numeric(fixef(sr_model)[1])
 sr_b_dist_first <- as.numeric(fixef(sr_model)[2])
 
-
 #3 - Any responder model
 ar_model <- glmer(binary_response ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(ar_model)
@@ -364,7 +363,7 @@ for (i in unique(data$drop_ID)) {
   
   #Calculate which individuals are emerged 
   drop_data <- data %>%
-    filter(drop_ID == i & !is.na(full_partial_none) & !is.na(dist_from_first_resp))
+    filter(drop_ID == i & !is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) # & !is.na(dist_from_first_resp)
   
   drop_eel_IDs <- unique(drop_data$colony_eel_ID)
   
