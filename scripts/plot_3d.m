@@ -1,10 +1,10 @@
-cd('/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/')
+%cd('/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/')
 
 
 
 %Load in data
 coord_filename = "ball_drop_data_with_3D_trial1.xlsx" %CHANGE
-imgcoordsRC_PC = readtable(coord_filename);
+imgcoordsRC = readtable(coord_filename);
 
 %Data wrangle
 imgcoordsRC_head = zeros(length(imgcoordsRC)/2, 3)

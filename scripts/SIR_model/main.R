@@ -15,7 +15,10 @@ library(stringr)
 
 #Data manipulation
 setwd("~/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment")
-data <- read_excel("master_ball_drop_data_3D_0216.xlsx")
+data <- read_excel("master_ball_drop_data_3D_0216.xlsx") %>%
+  filter(drop_ID != 152) %>%
+  filter (drop_ID != 169)
+
 
 data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
 data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
@@ -230,14 +233,14 @@ fr_intercept <- as.numeric(fixef(fr_model)[1])  # gives β₀ and β_distance
 fr_b_dist <- as.numeric(fixef(fr_model)[2]) 
 # Random effects
 fr_re_colony_colony_eel_ID <- ranef(fr_model)$'colony_eel_ID:colony'
-fr_re_colony_colony_eel_ID$combo <- rownames(re_colony_colony_eel_ID)
-fr_re_colony_colony_eel_ID$name <- str_extract(re_colony_colony_eel_ID$combo, "^[^:]+")
+fr_re_colony_colony_eel_ID$combo <- rownames(fr_re_colony_colony_eel_ID)
+fr_re_colony_colony_eel_ID$name <- str_extract(fr_re_colony_colony_eel_ID$combo, "^[^:]+")
 fr_re_drop_ID <- ranef(fr_model)$drop_ID    # u_drop for each drop nested in colony
-fr_re_drop_ID$combo <- rownames(re_drop_ID)
+fr_re_drop_ID$combo <- rownames(fr_re_drop_ID)
 fr_re_date <- ranef(fr_model)$date
-fr_re_date$combo <- rownames(re_date)
+fr_re_date$combo <- rownames(fr_re_date)
 fr_re_colony <- ranef(fr_model)$colony
-fr_re_colony$combo <- rownames(re_colony)
+fr_re_colony$combo <- rownames(fr_re_colony)
 
 #2 - Second responder model
 sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
@@ -264,7 +267,7 @@ subs_intercept <- as.numeric(fixef(subs_model)[1])
 subs_b_dist_ball <- as.numeric(fixef(subs_model)[2])
 #Random effects
 subs_re_colony_colony_eel_ID <- ranef(subs_model)$'colony_eel_ID:colony'
-subs_re_colony_colony_eel_ID$combo <- rownames(subs_colony_colony_eel_ID)
+subs_re_colony_colony_eel_ID$combo <- rownames(subs_re_colony_colony_eel_ID)
 subs_re_colony_colony_eel_ID$name <- str_extract(subs_re_colony_colony_eel_ID$combo, "^[^:]+")
 subs_re_drop_ID <- ranef(subs_model)$drop_ID    # u_drop for each drop nested in colony
 subs_re_drop_ID$combo <- rownames(subs_re_drop_ID)
@@ -374,7 +377,7 @@ max(ranges$range)
 max_rate <- 1
 dt <- 1
 da <- 1
-threshold <- 0.1
+threshold <- 0.01
 tm <- 10
 tr <- 5
 
@@ -392,15 +395,15 @@ for (i in unique(data$drop_ID)) {
   
   for (sim in 1:n_sims) {
     
+  #Calculate which individuals are emerged 
+  drop_data <- data %>%
+      filter(drop_ID == i & !is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) # & !is.na(dist_from_first_resp)
+    
+  drop_eel_IDs <- unique(drop_data$colony_eel_ID)
+    
   #create a frame recorder matrix
   social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
     
-  #Calculate which individuals are emerged 
-  drop_data <- data %>%
-    filter(drop_ID == i & !is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) # & !is.na(dist_from_first_resp)
-  
-  drop_eel_IDs <- unique(drop_data$colony_eel_ID)
-  
   resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
   
   colony_idx <- which(unique(data$colony) == first(drop_data$colony))
@@ -413,7 +416,7 @@ for (i in unique(data$drop_ID)) {
     l_date <- first(drop_data$date)
     l_colony <- first(drop_data$colony)
     #for each eel i in drop j nested in colony k, compute the linear predictor
-    eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + re_drop_ID$"(Intercept)"[re_drop_ID$combo == l_drop_ID] + re_colony_colony_eel_ID$"(Intercept)"[as.character(re_colony_colony_eel_ID$name) == l_colony_eel_ID] + re_date$"(Intercept)"[re_date$combo == l_date] + re_colony$"(Intercept)"[re_colony$combo == l_colony]
+    eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
     #convert this to a standard logistic transform - gives probability per eel
     p_respond <- 1/(1+exp(-eta_j))
     resp_data[h,1] <- l_colony_eel_ID
@@ -589,7 +592,7 @@ for (i in unique(data$drop_ID)) {
       l_date <- first(drop_data$date)
       l_colony <- first(drop_data$colony)
       #for each eel i in drop j nested in colony k, compute the linear predictor
-      eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + re_drop_ID$"(Intercept)"[re_drop_ID$combo == l_drop_ID] + re_colony_colony_eel_ID$"(Intercept)"[as.character(re_colony_colony_eel_ID$name) == l_colony_eel_ID] + re_date$"(Intercept)"[re_date$combo == l_date] + re_colony$"(Intercept)"[re_colony$combo == l_colony]
+      eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
       #convert this to a standard logistic transform - gives probability per eel
       p_respond <- 1/(1+exp(-eta_j))
       resp_data[h,1] <- l_colony_eel_ID
@@ -948,3 +951,6 @@ ggplot(all_timing, aes(x = source, y = relative_frame, fill = source)) +
     legend.position  = "none",
     panel.grid.minor = element_blank()
   )
+
+
+#Time series subset
