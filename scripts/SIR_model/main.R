@@ -52,6 +52,7 @@ data <- data %>%
     rank_order = rank(response_frame_cam1, na.last = "keep", ties.method = "first"),
     initator = as.integer(rank_order == 1),
     second_responder = as.integer(rank_order == 2),
+    subsequent_responder = ifelse(is.na(full_partial_none), NA, as.integer(!is.na(rank_order) & rank_order !=1)),
     first_x = base_X[first_index],
     first_y = base_Y[first_index],
     first_z = base_Z[first_index],
@@ -224,34 +225,53 @@ cv1(second_responder, initator_responder, lambda1=1,fold=10)
 #1 - First responder model
 fr_model <- glmer(first_responder ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(fr_model)
+# Fixed effects
+fr_intercept <- as.numeric(fixef(fr_model)[1])  # gives β₀ and β_distance
+fr_b_dist <- as.numeric(fixef(fr_model)[2]) 
+# Random effects
+fr_re_colony_colony_eel_ID <- ranef(fr_model)$'colony_eel_ID:colony'
+fr_re_colony_colony_eel_ID$combo <- rownames(re_colony_colony_eel_ID)
+fr_re_colony_colony_eel_ID$name <- str_extract(re_colony_colony_eel_ID$combo, "^[^:]+")
+fr_re_drop_ID <- ranef(fr_model)$drop_ID    # u_drop for each drop nested in colony
+fr_re_drop_ID$combo <- rownames(re_drop_ID)
+fr_re_date <- ranef(fr_model)$date
+fr_re_date$combo <- rownames(re_date)
+fr_re_colony <- ranef(fr_model)$colony
+fr_re_colony$combo <- rownames(re_colony)
 
 #2 - Second responder model
 sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
 summary(sr_model)
+#Fixed effects
 sr_intercept <- as.numeric(fixef(sr_model)[1])
-sr_b_dist_first <- as.numeric(fixef(sr_model)[2])
+sr_b_dist_first <- as.numeric(fixef(sr_model)[3])
+#Random effects
+sr_re_colony_colony_eel_ID <- ranef(sr_model)$'colony_eel_ID:colony'
+sr_re_colony_colony_eel_ID$combo <- rownames(sr_re_colony_colony_eel_ID)
+sr_re_colony_colony_eel_ID$name <- str_extract(sr_re_colony_colony_eel_ID$combo, "^[^:]+")
+sr_re_drop_ID <- ranef(sr_model)$drop_ID    # u_drop for each drop nested in colony
+sr_re_drop_ID$combo <- rownames(sr_re_drop_ID)
+sr_re_date <- ranef(sr_model)$date
+sr_re_date$combo <- rownames(sr_re_date)
+sr_re_colony <- ranef(sr_model)$colony
+sr_re_colony$combo <- rownames(sr_re_colony)
 
-#3 - Any responder model
-ar_model <- glmer(binary_response ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
-summary(ar_model)
-
-# Fixed effects
-fr_intercept <- as.numeric(fixef(fr_model)[1])  # gives β₀ and β_distance
-fr_b_dist <- as.numeric(fixef(fr_model)[2]) 
-
-# Random effects
-re_colony_colony_eel_ID <- ranef(fr_model)$'colony_eel_ID:colony'
-re_colony_colony_eel_ID$combo <- rownames(re_colony_colony_eel_ID)
-re_colony_colony_eel_ID$name <- str_extract(re_colony_colony_eel_ID$combo, "^[^:]+")
-
-re_drop_ID <- ranef(fr_model)$drop_ID    # u_drop for each drop nested in colony
-re_drop_ID$combo <- rownames(re_drop_ID)
-
-re_date <- ranef(fr_model)$date
-re_date$combo <- rownames(re_date)
-
-re_colony <- ranef(fr_model)$colony
-re_colony$combo <- rownames(re_colony)
+#3 - Subsequent responder model
+subs_model <- glmer(subsequent_responder ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
+summary(subs_model)
+#Fixed effects
+subs_intercept <- as.numeric(fixef(subs_model)[1])
+subs_b_dist_ball <- as.numeric(fixef(subs_model)[2])
+#Random effects
+subs_re_colony_colony_eel_ID <- ranef(subs_model)$'colony_eel_ID:colony'
+subs_re_colony_colony_eel_ID$combo <- rownames(subs_colony_colony_eel_ID)
+subs_re_colony_colony_eel_ID$name <- str_extract(subs_re_colony_colony_eel_ID$combo, "^[^:]+")
+subs_re_drop_ID <- ranef(subs_model)$drop_ID    # u_drop for each drop nested in colony
+subs_re_drop_ID$combo <- rownames(subs_re_drop_ID)
+subs_re_date <- ranef(subs_model)$date
+subs_re_date$combo <- rownames(subs_re_date)
+subs_re_colony <- ranef(subs_model)$colony
+subs_re_colony$combo <- rownames(subs_re_colony)
 
 n_drops <- length(unique(data$drop_ID))
 
@@ -332,7 +352,7 @@ for (c in 1:length(unique(data$colony))) {
                                 c(1,2), 
                                 function(x) {
                                   if (!is.na(x)) {
-                                    1/(1+exp(-sr_intercept-(sr_b_dist_first*x)))
+                                    1/(1+exp(-sr_intercept-(sr_b_dist_first*x))) #add in random effects!! but that would give a per drop weighting... 
                                     } else { 
                                       NA }
                                   })
@@ -342,7 +362,7 @@ for (c in 1:length(unique(data$colony))) {
 
 
 #Threshold strengths
-theta <- runif(n_eels)
+theta <- runif(n_eels) #not using right now, fixed
 
 #Frame range of cascades
 ranges <- data %>%
@@ -351,16 +371,30 @@ ranges <- data %>%
 
 max(ranges$range)
 
-max_rate <- 60
-dt <- 1/60
-da <- 1/60
-threshold <- 0.001
+max_rate <- 1
+dt <- 1
+da <- 1
+threshold <- 0.1
 tm <- 10
+tr <- 5
+
+n_sims <- 200
+social_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
+names(social_frame_recorder_list) <- unique(data$drop_ID)
+
 
 #2 - simulating the cascade at each drop 
 for (i in unique(data$drop_ID)) {
+  
   print(i)
   
+  social_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
+  
+  for (sim in 1:n_sims) {
+    
+  #create a frame recorder matrix
+  social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
+    
   #Calculate which individuals are emerged 
   drop_data <- data %>%
     filter(drop_ID == i & !is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) # & !is.na(dist_from_first_resp)
@@ -396,6 +430,8 @@ for (i in unique(data$drop_ID)) {
     #find index of first responder
     fr_idx <- which(drop_eel_IDs %in% fr_ID)
     
+    social_frame_recorder_matrix[fr_idx] <- 1
+    
     #create state matrix 
     state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
     state_matrix[fr_idx,1] <- "i"
@@ -422,21 +458,53 @@ for (i in unique(data$drop_ID)) {
         }
       }
     }
-    
-    
-    #create a frame recorder matrix
-    frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs))
   
     #for each time step 
-    for (k in 2:10) {
+    for (k in 2:20) {
       K <- sum(state_matrix[,k-1] == "s")
       for (j in 1:length(drop_eel_IDs)) {
         focal_eel_ID <- drop_eel_IDs[j]
         
         #Assigning states
-        if (state_matrix[j,k-1] == "i") { #if eel has already hid
+        if (state_matrix[j,k-1] == "r") { #if eel is recovered
+          state_matrix[j,k] <- "r"
+          dosage_matrix[j,k] <- NA
+          }
+        else if (state_matrix[j,k-1] == "i") { #if eel is infected
           dosage_matrix[j,k] <- NA #state and frame recorder matrices stay the same
-          state_matrix[j,k] <- "i" #for now, eventually change to recovered 
+          if (k-tr <= 0) {
+            state_matrix[j,k] <- "i"
+            
+            #dose everyone
+            for (jj in 1:length(drop_eel_IDs)) {
+              buddy_eel_ID <- drop_eel_IDs[jj]
+              wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
+              
+              if (rbinom(1,1,wij*max_rate*dt) == 1) {
+                dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
+              } else {
+                
+              }
+            }
+          } else { 
+            if (state_matrix[j,k-tr] == "i") {
+              state_matrix[j,k] <- "r"
+            } else {
+              state_matrix[j,k] <- "i"
+              
+              #dose everyone
+              for (jj in 1:length(drop_eel_IDs)) {
+                buddy_eel_ID <- drop_eel_IDs[jj]
+                wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
+                
+                if (rbinom(1,1,wij*max_rate*dt) == 1) {
+                  dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
+                } else {
+                  
+                }
+              }
+            }
+          }
         } else { #eel is susceptible to hide
           #calculate cumulative for the last x time steps
           #dosage_matrix[j] <- 0
@@ -458,7 +526,7 @@ for (i in unique(data$drop_ID)) {
           
           if (norm_cuml_dose > threshold) {
             state_matrix[j,k] <- "i"
-            frame_recorder_matrix[j] <- k
+            social_frame_recorder_matrix[j] <- k
             
             #dose everyone else
             for (jj in 1:length(drop_eel_IDs)) {
@@ -478,14 +546,405 @@ for (i in unique(data$drop_ID)) {
           }
         }
       }
+    }
+  }
+  social_frame_recorder_list[[i]][[sim]] <- social_frame_recorder_matrix
+  }
+}
+
+
+## Non social model ##
+n_sims <- 200
+non_social_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
+names(non_social_frame_recorder_list) <- unique(data$drop_ID)
+
+
+#2 - simulating the cascade at each drop 
+for (i in unique(data$drop_ID)) {
+  
+  print(i)
+  
+  non_social_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
+  
+  for (sim in 1:n_sims) {
+    
+    #Calculate which individuals are emerged 
+    drop_data <- data %>%
+      filter(drop_ID == i & !is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) # & !is.na(dist_from_first_resp)
+    
+    drop_eel_IDs <- unique(drop_data$colony_eel_ID)
+    
+    resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
+    
+    colony_idx <- which(unique(data$colony) == first(drop_data$colony))
+    
+    #create a frame recorder matrix
+    non_social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
+    
+    
+    #determine first responder
+    for (h in 1:length(drop_eel_IDs)) {
+      l_drop_ID <- first(drop_data$drop_ID)
+      l_colony_eel_ID <- drop_data$colony_eel_ID[h]
+      l_date <- first(drop_data$date)
+      l_colony <- first(drop_data$colony)
+      #for each eel i in drop j nested in colony k, compute the linear predictor
+      eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + re_drop_ID$"(Intercept)"[re_drop_ID$combo == l_drop_ID] + re_colony_colony_eel_ID$"(Intercept)"[as.character(re_colony_colony_eel_ID$name) == l_colony_eel_ID] + re_date$"(Intercept)"[re_date$combo == l_date] + re_colony$"(Intercept)"[re_colony$combo == l_colony]
+      #convert this to a standard logistic transform - gives probability per eel
+      p_respond <- 1/(1+exp(-eta_j))
+      resp_data[h,1] <- l_colony_eel_ID
+      resp_data[h,2] <- p_respond
+      resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_respond)
+    }
+    
+    #if there is a first responder
+    if (sum(resp_data[,3], na.rm = TRUE) > 0) {
       
+      #find IDs of first responder
+      fr_ID <- resp_data$V1[resp_data$V3 == 1]
+      
+      #find index of first responder
+      fr_idx <- which(drop_eel_IDs %in% fr_ID)
+      
+      non_social_frame_recorder_matrix[fr_idx] <- 1
+      
+      #create state matrix 
+      state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
+      state_matrix[fr_idx,1] <- "i"
+      state_matrix[-fr_idx,1] <- "s"
+    
+    #Compute second responders
+    for (h in 1:length(drop_eel_IDs)) {
+      if (state_matrix[h,1] == "i") {
+      } else {
+      l_drop_ID <- first(drop_data$drop_ID)
+      l_colony_eel_ID <- drop_data$colony_eel_ID[h]
+      l_date <- first(drop_data$date)
+      l_colony <- first(drop_data$colony)
+      eta_j <- subs_intercept + subs_b_dist_ball*(drop_data$distance_to_ball[h])
+      p_respond <- 1/(1+exp(-eta_j))
+        if (rbinom(n=1,size=1, p_respond) == 1) {
+          state_matrix[h,1] <- "i"
+          non_social_frame_recorder_matrix[h] <- 2
+          } else {
+          state_matrix[h,1] <- "s"
+          }
+        }
+      }
+    }
+    
+    non_social_frame_recorder_list[[i]][[sim]] <- non_social_frame_recorder_matrix
+  }
+}
+
+#Response vs no confusion matrix 
+library(tidyverse)
+library(ggplot2)
+
+# --- Observed: did any eel respond in this drop? ---
+observed_drop <- data %>%
+  filter(!is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) %>%
+  group_by(drop_ID) %>%
+  summarise(obs_responded = any(!is.na(response_frame_cam1)), .groups = "drop") %>%
+  mutate(drop_ID = as.character(drop_ID))
+
+# --- Helper: one prediction per drop per sim ---
+get_confusion_counts <- function(recorder_list, observed_df, n_sims) {
+  
+  rows <- list()
+  
+  for (i in seq_along(recorder_list)) {
+    drop_id <- names(recorder_list)[i]
+    sims    <- recorder_list[[i]]
+    
+    obs <- observed_df$obs_responded[observed_df$drop_ID == drop_id]
+    if (length(obs) == 0) next
+    
+    for (sim in sims) {
+      pred_responded <- any(!is.na(sim))
+      
+      if (obs & pred_responded)   category <- "True Positive"
+      if (obs & !pred_responded)  category <- "False Negative"
+      if (!obs & pred_responded)  category <- "False Positive"
+      if (!obs & !pred_responded) category <- "True Negative"
+      
+      rows <- append(rows, list(data.frame(
+        drop_ID  = as.character(drop_id),
+        category = as.character(category)
+      )))
+    }
+  }
+  
+  bind_rows(rows) %>%
+    group_by(category) %>%
+    summarise(total_count = n(), .groups = "drop")
+}
+
+# --- Compute for both models ---
+social_counts     <- get_confusion_counts(social_frame_recorder_list,     observed_drop, n_sims)
+non_social_counts <- get_confusion_counts(non_social_frame_recorder_list, observed_drop, n_sims)
+
+social_counts$model     <- "Social"
+non_social_counts$model <- "Non-Social"
+
+# --- Ensure all four categories present for both models ---
+all_categories <- c("True Positive", "False Negative", "False Positive", "True Negative")
+
+all_counts <- bind_rows(social_counts, non_social_counts) %>%
+  complete(model, category = all_categories, fill = list(total_count = 0)) %>%
+  mutate(
+    x_label = case_when(
+      category %in% c("True Positive", "False Negative") ~ "Observed:\nResponded",
+      TRUE                                                ~ "Observed:\nDid Not Respond"
+    ),
+    y_label = case_when(
+      category %in% c("True Positive", "False Positive") ~ "Predicted:\nResponded",
+      TRUE                                                ~ "Predicted:\nDid Not Respond"
+    ),
+    x_label = factor(x_label, levels = c("Observed:\nResponded", "Observed:\nDid Not Respond")),
+    y_label = factor(y_label, levels = c("Predicted:\nResponded", "Predicted:\nDid Not Respond"))
+  ) %>%
+  group_by(model, x_label) %>%
+  mutate(proportion = total_count / sum(total_count)) %>%
+  ungroup()
+
+# --- Plot ---
+ggplot(all_counts, aes(x = x_label, y = y_label, fill = proportion)) +
+  geom_tile(color = "white", linewidth = 1.2) +
+  geom_text(aes(label = paste0(category, "\n", scales::percent(proportion, accuracy = 1))),
+            size = 3.5, fontface = "bold", color = "white") +
+  scale_fill_gradient(low = "#d1e5f0", high = "#2166ac",
+                      labels = scales::percent,
+                      name = "Proportion\nof observed") +
+  facet_wrap(~model, ncol = 2) +
+  labs(
+    title = "Model Prediction Accuracy vs Observed Responses",
+    x = "Observed",
+    y = "Predicted"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid      = element_blank(),
+    strip.text      = element_text(face = "bold", size = 14),
+    axis.text       = element_text(size = 11),
+    legend.position = "right"
+  )
+
+#Cascade vs single response
+# --- Observed: among drops with a response, single vs cascade ---
+observed_drop_cascade <- data %>%
+  filter(!is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) %>%
+  group_by(drop_ID) %>%
+  summarise(n_responded = sum(!is.na(response_frame_cam1)), .groups = "drop") %>%
+  filter(n_responded > 0) %>%  # only drops where someone responded
+  mutate(
+    drop_ID = as.character(drop_ID),
+    obs_cascade = n_responded > 1
+  )
+
+# --- Helper ---
+get_confusion_counts_cascade <- function(recorder_list, observed_df, n_sims) {
+  
+  rows <- list()
+  
+  for (i in seq_along(recorder_list)) {
+    drop_id <- names(recorder_list)[i]
+    sims    <- recorder_list[[i]]
+    
+    obs <- observed_df$obs_cascade[observed_df$drop_ID == drop_id]
+    if (length(obs) == 0) next  # skips drops with no observed response
+    
+    for (sim in sims) {
+      pred_cascade <- sum(!is.na(sim)) > 1
+      
+      if (obs & pred_cascade)   category <- "True Positive"
+      if (obs & !pred_cascade)  category <- "False Negative"
+      if (!obs & pred_cascade)  category <- "False Positive"
+      if (!obs & !pred_cascade) category <- "True Negative"
+      
+      rows <- append(rows, list(data.frame(drop_ID  = as.character(drop_id),
+                                           category = as.character(category))))
+    }
+  }
+  
+  bind_rows(rows) %>%
+    group_by(category) %>%
+    summarise(total_count = n(), .groups = "drop")
+}
+
+# --- Compute for both models ---
+social_counts_cascade     <- get_confusion_counts_cascade(social_frame_recorder_list,     observed_drop_cascade, n_sims)
+non_social_counts_cascade <- get_confusion_counts_cascade(non_social_frame_recorder_list, observed_drop_cascade, n_sims)
+
+social_counts_cascade$model     <- "Social"
+non_social_counts_cascade$model <- "Non-Social"
+
+# --- Ensure all four categories present ---
+all_categories <- c("True Positive", "False Negative", "False Positive", "True Negative")
+
+all_counts_cascade <- bind_rows(social_counts_cascade, non_social_counts_cascade) %>%
+  complete(model, category = all_categories, fill = list(total_count = 0)) %>%
+  mutate(
+    x_label = case_when(
+      category %in% c("True Positive", "False Negative") ~ "Observed:\nCascade",
+      TRUE                                                ~ "Observed:\nSingle Response"
+    ),
+    y_label = case_when(
+      category %in% c("True Positive", "False Positive") ~ "Predicted:\nCascade",
+      TRUE                                                ~ "Predicted:\nSingle Response"
+    ),
+    x_label = factor(x_label, levels = c("Observed:\nCascade", "Observed:\nSingle Response")),
+    y_label = factor(y_label, levels = c("Predicted:\nCascade", "Predicted:\nSingle Response"))
+  ) %>%
+  group_by(model, x_label) %>%
+  mutate(proportion = total_count / sum(total_count)) %>%
+  ungroup()
+
+# --- Plot ---
+ggplot(all_counts_cascade, aes(x = x_label, y = y_label, fill = proportion)) +
+  geom_tile(color = "white", linewidth = 1.2) +
+  geom_text(aes(label = paste0(category, "\n", scales::percent(proportion, accuracy = 1))),
+            size = 3.5, fontface = "bold", color = "white") +
+  scale_fill_gradient(low = "#d1e5f0", high = "#2166ac",
+                      labels = scales::percent,
+                      name = "Proportion\nof observed") +
+  facet_wrap(~model, ncol = 2) +
+  labs(
+    title = "Cascade vs Single Response Prediction\n(drops with at least one responder only)",
+    x = "Observed",
+    y = "Predicted"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid      = element_blank(),
+    strip.text      = element_text(face = "bold", size = 14),
+    axis.text       = element_text(size = 11),
+    legend.position = "right"
+  )
+
+#social vs non social difference in number of responders
+# --- Observed: mean number of responders per drop ---
+observed_cascade_size <- data %>%
+  filter(!is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) %>%
+  group_by(drop_ID) %>%
+  summarise(n_responded = sum(!is.na(response_frame_cam1)), .groups = "drop") %>%
+  mutate(drop_ID = as.character(drop_ID))
+
+# --- Helper: mean responders per sim, then difference to observed ---
+get_cascade_size_diff <- function(recorder_list, observed_df, n_sims, model_name) {
+  
+  rows <- list()
+  
+  for (i in seq_along(recorder_list)) {
+    drop_id <- names(recorder_list)[i]
+    sims    <- recorder_list[[i]]
+    
+    obs_n <- observed_df$n_responded[observed_df$drop_ID == drop_id]
+    if (length(obs_n) == 0) next
+    
+    # mean number of responders across sims for this drop
+    mean_pred_n <- mean(sapply(sims, function(sim) sum(!is.na(sim))))
+    
+    rows <- append(rows, list(data.frame(
+      drop_ID    = as.character(drop_id),
+      obs_n      = obs_n,
+      pred_n     = mean_pred_n,
+      difference = mean_pred_n - obs_n,
+      model      = model_name
+    )))
+  }
+  
+  bind_rows(rows)
+}
+
+# --- Compute for both models ---
+social_diff     <- get_cascade_size_diff(social_frame_recorder_list,     observed_cascade_size, n_sims, "Social")
+non_social_diff <- get_cascade_size_diff(non_social_frame_recorder_list, observed_cascade_size, n_sims, "Non-Social")
+
+all_diff <- bind_rows(social_diff, non_social_diff) %>%
+  mutate(model = factor(model, levels = c("Social", "Non-Social")))
+
+# --- Plot ---
+ggplot(all_diff, aes(x = model, y = difference, fill = model)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40", linewidth = 0.8) +
+  geom_boxplot(outlier.shape = 21, outlier.size = 2, alpha = 0.8, width = 0.5) +
+  scale_fill_manual(values = c("Social" = "#2166ac", "Non-Social" = "#E57373")) +
+  labs(
+    title = "Predicted vs Observed Cascade Size",
+    subtitle = "Difference = mean predicted responders - observed responders per drop",
+    x = "",
+    y = "Difference in number of responders\n(predicted - observed)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank()
+  )
+
+#Timing
+# --- Observed: frame number relative to first responder ---
+observed_timing <- data %>%
+  filter(!is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2) & 
+           !is.na(response_frame_cam1)) %>%
+  group_by(drop_ID) %>%
+  mutate(
+    first_frame    = min(response_frame_cam1, na.rm = TRUE),
+    relative_frame = response_frame_cam1 - first_frame
+  ) %>%
+  ungroup() %>%
+  mutate(drop_ID = as.character(drop_ID),
+         source  = "Observed") %>%
+  filter(relative_frame < 200)
+
+# --- Predicted: extract frame numbers from social model, relative to first responder ---
+sim_timing_rows <- list()
+
+for (i in seq_along(social_frame_recorder_list)) {
+  drop_id <- names(social_frame_recorder_list)[i]
+  sims    <- social_frame_recorder_list[[i]]
+  
+  for (sim_idx in seq_along(sims)) {
+    sim <- sims[[sim_idx]]
+    
+    frames <- sim[!is.na(sim)]
+    
+    if (length(frames) == 0) next
+    
+    first_frame <- min(frames)
+    
+    for (f in frames) {
+      sim_timing_rows <- append(sim_timing_rows, list(data.frame(
+        drop_ID        = as.character(drop_id),
+        sim_idx        = sim_idx,
+        relative_frame = f - first_frame,
+        source         = "Social Model"
+      )))
     }
   }
 }
-        
 
+sim_timing <- bind_rows(sim_timing_rows)
 
+# --- Combine ---
+all_timing <- bind_rows(
+  observed_timing %>% dplyr::select(drop_ID, relative_frame, source),
+  sim_timing      %>% dplyr::select(drop_ID, relative_frame, source)
+) %>%
+  mutate(source = factor(source, levels = c("Observed", "Social Model")))
 
-
-
-p_ij <- 1/(1+exp(-b1-b2*LMD))
+# --- Plot ---
+ggplot(all_timing, aes(x = source, y = relative_frame, fill = source)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey40", linewidth = 0.8) +
+  geom_boxplot(outlier.shape = 21, outlier.size = 1.5, alpha = 0.8, width = 0.5) +
+  scale_fill_manual(values = c("Observed" = "#4CAF50", "Social Model" = "#2166ac")) +
+  labs(
+    title = "Timing of Individual Responses",
+    subtitle = "Frame number relative to first responder (0 = first responder)",
+    x = "",
+    y = "Relative response frame"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position  = "none",
+    panel.grid.minor = element_blank()
+  )
