@@ -13,12 +13,23 @@ library(glmmLasso)
 library(tibble)
 library(stringr)
 
+#Some drops the first response frame is before the ball enters view, filter these. - 176
+#Fish in frame - 146
+#Some have far apart second and first because eel across the group started to hide but it seems like the others don't see - 168, 40
+#Tangled line - 157
+
 #Data manipulation
 setwd("~/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment")
 data <- read_excel("master_ball_drop_data_3D_0216.xlsx") %>%
   filter(drop_ID != 152) %>%
-  filter (drop_ID != 169)
-
+  filter (drop_ID != 169) %>%
+  filter (drop_ID != 146) %>%
+  filter(drop_ID != 176) %>%
+  filter(drop_ID != 157) %>%
+  filter(drop_ID != 147) %>%
+  filter(drop_ID != 180) %>%
+  filter(drop_ID != 179)  %>%
+  filter(trial_ID != 5)
 
 data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
 data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
@@ -47,15 +58,16 @@ data <- data %>%
 data <- data %>%
   group_by(drop_ID) %>%
   mutate(first_responder = as.integer(!is.na(response_frame_cam1) & response_frame_cam1 == min(response_frame_cam1, na.rm = TRUE))) %>%
-  mutate(first_index = if (any(full_partial_none != 0 & !is.na(full_partial_none)))
-    which.min(ifelse(full_partial_none != 0 & !is.na(full_partial_none),
+  mutate(first_index = if (any(full_partial_none !=0 & !is.na(full_partial_none)))
+    which.min(ifelse(full_partial_none !=0 & !is.na(full_partial_none),
                      response_frame_cam1, Inf))
     else NA_integer_) %>%
   mutate(
-    rank_order = rank(response_frame_cam1, na.last = "keep", ties.method = "first"),
+    rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  # only rank full responders
+                      na.last = "keep", ties.method = "first"),
     initator = as.integer(rank_order == 1),
     second_responder = as.integer(rank_order == 2),
-    subsequent_responder = ifelse(is.na(full_partial_none), NA, as.integer(!is.na(rank_order) & rank_order !=1)),
+    subsequent_responder = ifelse(is.na(full_partial_none !=0), NA, as.integer(!is.na(rank_order) & rank_order !=1)),
     first_x = base_X[first_index],
     first_y = base_Y[first_index],
     first_z = base_Z[first_index],
@@ -64,10 +76,34 @@ data <- data %>%
       !is.na(full_partial_none),
       sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
       NA_real_
-    )) %>%
-    ungroup()
+    ),
+    time_lag_since_first =
+      response_frame_cam1 - response_frame_cam1[first_index]
+    ) %>%
+  ungroup()
 
-  
+#Summarise data for time lag between first and second
+first_pair_time_lag <- data %>% 
+  filter(second_responder == 1) %>% 
+  group_by(drop_ID) %>%
+  filter(sum(time_lag_since_first == 0, na.rm=TRUE) == 0) %>%
+  ungroup()
+
+#%>%
+  #filter(time_lag_since_first > 0)
+
+first_pair_time_lag %>%
+  ggplot(aes(x = time_lag_since_first * (1000/60))) +
+  geom_histogram(binwidth = 3 * (1000/60), color = "black", fill = "lightblue") +
+  labs(x = "Time lag (ms)")
+
+first_pair_time_lag %>%
+  ggplot(aes(x=dist_from_first_resp, y = time_lag_since_first* (1000/60))) +
+  geom_point() +
+  geom_smooth(method ="lm") +
+  labs(y = "Time lag (ms)", x = "Distance from first responder")
+
+
 #Fit a model for initator responder pairs
 #Summarise data by initiator-responder pairs
 initator_responder <- data %>%
@@ -87,10 +123,12 @@ initator_responder <- data %>%
     first_z = base_Z[first_index],
     # Compute distance only for responders
     dist_from_first_resp = ifelse(
-    !is.na(full_partial_none),
-    sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
-    NA_real_
-    )
+      !is.na(full_partial_none),
+      sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
+      NA_real_
+    ), 
+    time_lag_since_first =
+      response_frame_cam1 - response_frame_cam1[first_index]
   ) %>%
   filter(!is.na(dist_from_first_resp) & dist_from_first_resp > 0) %>%
   ungroup()
@@ -173,7 +211,7 @@ for (j in 1:length(lambda)) {
     #    "| dev:", round(devianz_vec[j], 2),
     #    "| coefs:", round(glm1$coefficients[-1], 3), "\n")
   }
-
+  
 }
 
 # Exclude null model (any lambda where ALL non-intercept coefs are zero)
@@ -356,9 +394,9 @@ for (c in 1:length(unique(data$colony))) {
                                 function(x) {
                                   if (!is.na(x)) {
                                     1/(1+exp(-sr_intercept-(sr_b_dist_first*x))) #add in random effects!! but that would give a per drop weighting... 
-                                    } else { 
-                                      NA }
-                                  })
+                                  } else { 
+                                    NA }
+                                })
   
   weight_strengths[[c]] <- trial_distances_mean
 }
@@ -395,104 +433,87 @@ for (i in unique(data$drop_ID)) {
   
   for (sim in 1:n_sims) {
     
-  #Calculate which individuals are emerged 
-  drop_data <- data %>%
+    #Calculate which individuals are emerged 
+    drop_data <- data %>%
       filter(drop_ID == i & !is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) # & !is.na(dist_from_first_resp)
     
-  drop_eel_IDs <- unique(drop_data$colony_eel_ID)
+    drop_eel_IDs <- unique(drop_data$colony_eel_ID)
     
-  #create a frame recorder matrix
-  social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
+    #create a frame recorder matrix
+    social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
     
-  resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
-  
-  colony_idx <- which(unique(data$colony) == first(drop_data$colony))
-  
-  
-  #determine first responder
-  for (h in 1:length(drop_eel_IDs)) {
-    l_drop_ID <- first(drop_data$drop_ID)
-    l_colony_eel_ID <- drop_data$colony_eel_ID[h]
-    l_date <- first(drop_data$date)
-    l_colony <- first(drop_data$colony)
-    #for each eel i in drop j nested in colony k, compute the linear predictor
-    eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
-    #convert this to a standard logistic transform - gives probability per eel
-    p_respond <- 1/(1+exp(-eta_j))
-    resp_data[h,1] <- l_colony_eel_ID
-    resp_data[h,2] <- p_respond
-    resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_respond)
-  }
-  
-  #if there is a first responder
-  if (sum(resp_data[,3], na.rm = TRUE) > 0) {
+    resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
     
-    #find IDs of first responder
-    fr_ID <- resp_data$V1[resp_data$V3 == 1]
+    colony_idx <- which(unique(data$colony) == first(drop_data$colony))
     
-    #find index of first responder
-    fr_idx <- which(drop_eel_IDs %in% fr_ID)
     
-    social_frame_recorder_matrix[fr_idx] <- 1
+    #determine first responder
+    for (h in 1:length(drop_eel_IDs)) {
+      l_drop_ID <- first(drop_data$drop_ID)
+      l_colony_eel_ID <- drop_data$colony_eel_ID[h]
+      l_date <- first(drop_data$date)
+      l_colony <- first(drop_data$colony)
+      #for each eel i in drop j nested in colony k, compute the linear predictor
+      eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
+      #convert this to a standard logistic transform - gives probability per eel
+      p_respond <- 1/(1+exp(-eta_j))
+      resp_data[h,1] <- l_colony_eel_ID
+      resp_data[h,2] <- p_respond
+      resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_respond)
+    }
     
-    #create state matrix 
-    state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
-    state_matrix[fr_idx,1] <- "i"
-    state_matrix[-fr_idx,1] <- "s"
-    
-    #create dosage matrix 
-    dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
-    dosage_matrix[fr_idx,] <- NA
-    dosage_matrix[-fr_idx,] <- 0
-    
-    #calculate dosage from first responders
-    for (z in fr_ID) {
-      for (j in 1:length(drop_eel_IDs)) {
-        focal_eel_ID <- drop_eel_IDs[j]
-        if (state_matrix[j,1] == "i") {
-          dosage_matrix[j,1] <- NA
-        } else {
-          wij <- weight_strengths[[colony_idx]][focal_eel_ID, z]
-          if (rbinom(1,1,wij*max_rate*dt)== 1) {
-            dosage_matrix[j,1] <- dosage_matrix[j,1] + da
+    #if there is a first responder
+    if (sum(resp_data[,3], na.rm = TRUE) > 0) {
+      
+      #find IDs of first responder
+      fr_ID <- resp_data$V1[resp_data$V3 == 1]
+      
+      #find index of first responder
+      fr_idx <- which(drop_eel_IDs %in% fr_ID)
+      
+      social_frame_recorder_matrix[fr_idx] <- 1
+      
+      #create state matrix 
+      state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
+      state_matrix[fr_idx,1] <- "i"
+      state_matrix[-fr_idx,1] <- "s"
+      
+      #create dosage matrix 
+      dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
+      dosage_matrix[fr_idx,] <- NA
+      dosage_matrix[-fr_idx,] <- 0
+      
+      #calculate dosage from first responders
+      for (z in fr_ID) {
+        for (j in 1:length(drop_eel_IDs)) {
+          focal_eel_ID <- drop_eel_IDs[j]
+          if (state_matrix[j,1] == "i") {
+            dosage_matrix[j,1] <- NA
           } else {
-            
+            wij <- weight_strengths[[colony_idx]][focal_eel_ID, z]
+            if (rbinom(1,1,wij*max_rate*dt)== 1) {
+              dosage_matrix[j,1] <- dosage_matrix[j,1] + da
+            } else {
+              
+            }
           }
         }
       }
-    }
-  
-    #for each time step 
-    for (k in 2:20) {
-      K <- sum(state_matrix[,k-1] == "s")
-      for (j in 1:length(drop_eel_IDs)) {
-        focal_eel_ID <- drop_eel_IDs[j]
-        
-        #Assigning states
-        if (state_matrix[j,k-1] == "r") { #if eel is recovered
-          state_matrix[j,k] <- "r"
-          dosage_matrix[j,k] <- NA
+      
+      #for each time step 
+      for (k in 2:20) {
+        K <- sum(state_matrix[,k-1] == "s")
+        for (j in 1:length(drop_eel_IDs)) {
+          focal_eel_ID <- drop_eel_IDs[j]
+          
+          #Assigning states
+          if (state_matrix[j,k-1] == "r") { #if eel is recovered
+            state_matrix[j,k] <- "r"
+            dosage_matrix[j,k] <- NA
           }
-        else if (state_matrix[j,k-1] == "i") { #if eel is infected
-          dosage_matrix[j,k] <- NA #state and frame recorder matrices stay the same
-          if (k-tr <= 0) {
-            state_matrix[j,k] <- "i"
-            
-            #dose everyone
-            for (jj in 1:length(drop_eel_IDs)) {
-              buddy_eel_ID <- drop_eel_IDs[jj]
-              wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
-              
-              if (rbinom(1,1,wij*max_rate*dt) == 1) {
-                dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
-              } else {
-                
-              }
-            }
-          } else { 
-            if (state_matrix[j,k-tr] == "i") {
-              state_matrix[j,k] <- "r"
-            } else {
+          else if (state_matrix[j,k-1] == "i") { #if eel is infected
+            dosage_matrix[j,k] <- NA #state and frame recorder matrices stay the same
+            if (k-tr <= 0) {
               state_matrix[j,k] <- "i"
               
               #dose everyone
@@ -506,52 +527,69 @@ for (i in unique(data$drop_ID)) {
                   
                 }
               }
-            }
-          }
-        } else { #eel is susceptible to hide
-          #calculate cumulative for the last x time steps
-          #dosage_matrix[j] <- 0
-          
-          #choose to hide based on dosage from the last tm steps
-          
-          tm <- 5
-          
-          if (k < tm+1) {
-            tm <- k - 1
-          } 
-          
-          cuml_dose <- 0
-          for (t in (k-tm):(k-1)) {
-            cuml_dose <- dosage_matrix[j,t] + cuml_dose
-          }
-          
-          norm_cuml_dose <- cuml_dose/K
-          
-          if (norm_cuml_dose > threshold) {
-            state_matrix[j,k] <- "i"
-            social_frame_recorder_matrix[j] <- k
-            
-            #dose everyone else
-            for (jj in 1:length(drop_eel_IDs)) {
-              buddy_eel_ID <- drop_eel_IDs[jj]
-              wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
-              
-              if (rbinom(1,1,wij*max_rate*dt) == 1) {
-                dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
+            } else { 
+              if (state_matrix[j,k-tr] == "i") {
+                state_matrix[j,k] <- "r"
               } else {
+                state_matrix[j,k] <- "i"
                 
+                #dose everyone
+                for (jj in 1:length(drop_eel_IDs)) {
+                  buddy_eel_ID <- drop_eel_IDs[jj]
+                  wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
+                  
+                  if (rbinom(1,1,wij*max_rate*dt) == 1) {
+                    dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
+                  } else {
+                    
+                  }
+                }
               }
             }
-          
-          } else {
-            state_matrix[j,k] <- "s"
-            dosage_matrix[j,k] <- dosage_matrix[j,k]
+          } else { #eel is susceptible to hide
+            #calculate cumulative for the last x time steps
+            #dosage_matrix[j] <- 0
+            
+            #choose to hide based on dosage from the last tm steps
+            
+            tm <- 5
+            
+            if (k < tm+1) {
+              tm <- k - 1
+            } 
+            
+            cuml_dose <- 0
+            for (t in (k-tm):(k-1)) {
+              cuml_dose <- dosage_matrix[j,t] + cuml_dose
+            }
+            
+            norm_cuml_dose <- cuml_dose/K
+            
+            if (norm_cuml_dose > threshold) {
+              state_matrix[j,k] <- "i"
+              social_frame_recorder_matrix[j] <- k
+              
+              #dose everyone else
+              for (jj in 1:length(drop_eel_IDs)) {
+                buddy_eel_ID <- drop_eel_IDs[jj]
+                wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
+                
+                if (rbinom(1,1,wij*max_rate*dt) == 1) {
+                  dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
+                } else {
+                  
+                }
+              }
+              
+            } else {
+              state_matrix[j,k] <- "s"
+              dosage_matrix[j,k] <- dosage_matrix[j,k]
+            }
           }
         }
       }
     }
-  }
-  social_frame_recorder_list[[i]][[sim]] <- social_frame_recorder_matrix
+    social_frame_recorder_list[[i]][[sim]] <- social_frame_recorder_matrix
   }
 }
 
@@ -615,22 +653,22 @@ for (i in unique(data$drop_ID)) {
       state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
       state_matrix[fr_idx,1] <- "i"
       state_matrix[-fr_idx,1] <- "s"
-    
-    #Compute second responders
-    for (h in 1:length(drop_eel_IDs)) {
-      if (state_matrix[h,1] == "i") {
-      } else {
-      l_drop_ID <- first(drop_data$drop_ID)
-      l_colony_eel_ID <- drop_data$colony_eel_ID[h]
-      l_date <- first(drop_data$date)
-      l_colony <- first(drop_data$colony)
-      eta_j <- subs_intercept + subs_b_dist_ball*(drop_data$distance_to_ball[h])
-      p_respond <- 1/(1+exp(-eta_j))
-        if (rbinom(n=1,size=1, p_respond) == 1) {
-          state_matrix[h,1] <- "i"
-          non_social_frame_recorder_matrix[h] <- 2
+      
+      #Compute second responders
+      for (h in 1:length(drop_eel_IDs)) {
+        if (state_matrix[h,1] == "i") {
+        } else {
+          l_drop_ID <- first(drop_data$drop_ID)
+          l_colony_eel_ID <- drop_data$colony_eel_ID[h]
+          l_date <- first(drop_data$date)
+          l_colony <- first(drop_data$colony)
+          eta_j <- subs_intercept + subs_b_dist_ball*(drop_data$distance_to_ball[h])
+          p_respond <- 1/(1+exp(-eta_j))
+          if (rbinom(n=1,size=1, p_respond) == 1) {
+            state_matrix[h,1] <- "i"
+            non_social_frame_recorder_matrix[h] <- 2
           } else {
-          state_matrix[h,1] <- "s"
+            state_matrix[h,1] <- "s"
           }
         }
       }
@@ -954,3 +992,90 @@ ggplot(all_timing, aes(x = source, y = relative_frame, fill = source)) +
 
 
 #Time series subset
+library(tidyverse)
+library(ggplot2)
+
+DROP_SUBSET <- unique(data$drop_ID)[1:8]
+
+# ── Max frame from subset only ───────────────────────────────────────────────
+max_frame <- data %>%
+  filter(drop_ID %in% DROP_SUBSET,
+         !is.na(response_frame_cam1)) %>%
+  group_by(drop_ID) %>%
+  mutate(first_frame    = min(response_frame_cam1, na.rm = TRUE),
+         relative_frame = response_frame_cam1 - first_frame + 1) %>%
+  ungroup() %>%
+  summarise(max_rf = max(relative_frame, na.rm = TRUE)) %>%
+  pull(max_rf)
+
+# ── Observed (per frame) ─────────────────────────────────────────────────────
+obs_long <- data %>%
+  filter(drop_ID %in% DROP_SUBSET,
+         !is.na(full_partial_none),
+         !is.na(base_x_cam1),
+         !is.na(base_x_cam2),
+         !is.na(response_frame_cam1)) %>%
+  group_by(drop_ID) %>%
+  mutate(first_frame    = min(response_frame_cam1, na.rm = TRUE),
+         relative_frame = response_frame_cam1 - first_frame + 1) %>%
+  ungroup() %>%
+  group_by(drop_ID, relative_frame) %>%
+  summarise(n_hides = n_distinct(colony_eel_ID), .groups = "drop") %>%
+  mutate(model = "Observed")
+
+# ── Social model (per frame, no scaling) ─────────────────────────────────────
+social_long <- map_dfr(DROP_SUBSET, function(did) {
+  sims <- social_frame_recorder_list[[as.character(did)]]
+  if (is.null(sims)) return(NULL)
+  
+  map_dfr(seq_along(sims), function(s) {
+    sim <- sims[[s]]
+    if (is.null(sim) || all(is.na(sim))) return(NULL)
+    
+    frames <- sim[!is.na(sim)]
+    first  <- min(frames)
+    
+    tibble(
+      drop_ID = did,
+      relative_frame = (frames - first + 1),
+      sim = s
+    )
+  })
+}) %>%
+  group_by(drop_ID, relative_frame, sim) %>%
+  summarise(n_hides = n(), .groups = "drop") %>%
+  group_by(drop_ID, relative_frame) %>%
+  summarise(n_hides = mean(n_hides), .groups = "drop") %>%
+  mutate(model = "Social model")
+
+# ── Combine and fill missing frames ──────────────────────────────────────────
+plot_data <- bind_rows(obs_long, social_long) %>%
+  complete(drop_ID = DROP_SUBSET,
+           relative_frame = 1:max_frame,
+           model = c("Observed", "Social model"),
+           fill = list(n_hides = 0)) %>%
+  mutate(model = factor(model, levels = c("Observed", "Social model")))
+
+# ── Plot ─────────────────────────────────────────────────────────────────────
+ggplot(plot_data, aes(x = relative_frame,
+                      y = factor(drop_ID),
+                      fill = n_hides)) +
+  geom_tile() +
+  facet_grid(model ~ ., scales = "free_y", space = "free_y") +
+  scale_fill_gradient(
+    low  = "#e8f4f8",
+    high = "#042c53",
+    name = "Eels hiding"
+  ) +
+  scale_x_continuous(
+    name = "Frame (relative to first responder)",
+    breaks = seq(0, max_frame, by = 10),  # adjust spacing if needed
+    expand = c(0, 0)
+  ) +
+  labs(y = "Drop ID") +
+  theme_minimal(base_size = 12) +
+  theme(
+    strip.text      = element_text(face = "bold"),
+    panel.grid      = element_blank(),
+    panel.spacing.y = unit(0.8, "lines")
+  )
