@@ -7,13 +7,13 @@ from calib_functions_ball_drop import *
 
 ##################################################################################################USER EDITS START HERE################################################################################################
 #Enter the path to the focal follow csv file.
-CSV_Path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data.xlsx"
+CSV_Path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data.xlsx"
 #Enter the path/name for your output csv file.
-Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/calib_results_trial16.xlsx"
+Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/final_triangulation/calib_results_trial1.xlsx"
 #Path for triangulated points
-output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data_3D_trial16.xlsx"
+output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/final_triangulation/ball_drop_data_3D_trial1.xlsx"
 #Base path for frames
-base_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Curacao_2024/garden_eels/position_drop_experiment/triangulation_frames"
+base_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/triangulation_frames"
 
 
 #Enter sheet name here
@@ -61,7 +61,7 @@ End_Col2="calib_end_time2"
 Folder_Col1="calib_1_path"
 Folder_Col2="calib_2_path"
 
-df = df[df["trial_ID"] == 16]
+df = df[df["trial_ID"] == 1]
 
 current_trial_id = None
 
@@ -152,15 +152,18 @@ for i, row in df.iterrows():
                 pts_R = np.array([[x2, y2]], dtype=float)
 
                 # Triangulate single 3D point
-                point_3D = triangulate(mtx1, mtx2, dist1, dist2, R, T, pts_L, pts_R)
+                point_3D, reproj_errors = triangulate(mtx1, mtx2, dist1, dist2, R, T, pts_L, pts_R)
+                print("Successfully triangulated")
 
                 # If your triangulate() returns Nx3 array, extract the first element
                 point_3D = point_3D[0] if len(point_3D.shape) > 1 else point_3D
-                
+                print(point_3D) 
+
                 # Update dataframe values
                 df.at[i, f"{label}_X"] = point_3D[0]
                 df.at[i, f"{label}_Y"] = point_3D[1]
                 df.at[i, f"{label}_Z"] = point_3D[2]
+                df.at[i, f"{label}_reproj_error"] = reproj_errors[0]
 
             except Exception as e:
                 print(f"❌ Error triangulating {label} (row {i}): {e}")

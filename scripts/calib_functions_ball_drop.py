@@ -444,10 +444,10 @@ def calibrate_camera(base_path, images_folder):
             board_width_px  = corners[:, 0, 0].ptp()
             board_height_px = corners[:, 0, 1].ptp()
 
-            if board_width_px < 200 or board_height_px < 200:
-                print(f"⚠️ Skipping frame {i}: checkerboard too small "
-                      f"({board_width_px:.1f}×{board_height_px:.1f}px)")
-                continue
+            #if board_width_px < 200 or board_height_px < 200:
+            #    print(f"⚠️ Skipping frame {i}: checkerboard too small "
+            #          f"({board_width_px:.1f}×{board_height_px:.1f}px)")
+            #    continue
 
             cv.drawChessboardCorners(frame, (columns,rows), corners, ret)
             print(f"Number of corners; {len(corners)}")
@@ -915,8 +915,8 @@ def stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames
             bw2 = corners2[:,0,0].ptp()
             bh2 = corners2[:,0,1].ptp()
 
-            if min(bw1, bh1, bw2, bh2) < 200:
-                continue
+            #if min(bw1, bh1, bw2, bh2) < 200:
+            #    continue
             
             cv.drawChessboardCorners(frame1, (columns,rows), corners1, c_ret1)
             #cv.imshow('img', frame1)
@@ -1054,6 +1054,9 @@ def triangulate(mtx1, mtx2, dist1, dist2, R, T, fishpoints1, fishpoints2):
     uvs1 = fishpoints1
     uvs2 = fishpoints2
 
+    uvs1 = np.atleast_2d(uvs1)
+    uvs2 = np.atleast_2d(uvs2)
+
     # #optional undistortion?
     # uvs1 = cv.undistortPoints(
     # uvs1.reshape(-1,1,2),
@@ -1091,18 +1094,45 @@ def triangulate(mtx1, mtx2, dist1, dist2, R, T, fishpoints1, fishpoints2):
         
         return Vh[3,0:3]/Vh[3,3]
  
+    def DLT_with_reproj(P1, P2, point1, point2):
+        A = [point1[1]*P1[2,:] - P1[1,:],
+            P1[0,:] - point1[0]*P1[2,:],
+            point2[1]*P2[2,:] - P2[1,:],
+            P2[0,:] - point2[0]*P2[2,:]]
+        A = np.array(A).reshape((4,4))
+        B = A.transpose() @ A
+        from scipy import linalg
+        U, s, Vh = linalg.svd(B, full_matrices=False)
+        p3d = Vh[3,0:3] / Vh[3,3]
+    
+        # Reproject into both cameras
+        p3d_h = np.append(p3d, 1.0)  # homogeneous
+        proj1 = P1 @ p3d_h
+        proj2 = P2 @ p3d_h
+        proj1 = proj1[:2] / proj1[2]
+        proj2 = proj2[:2] / proj2[2]
+    
+        err1 = np.linalg.norm(proj1 - np.array(point1))
+        err2 = np.linalg.norm(proj2 - np.array(point2))
+        rmse = np.sqrt((err1**2 + err2**2) / 2)
+    
+        return p3d, rmse
+    
     p3ds = []
+    reproj_errors = []
     for uv1, uv2 in zip(uvs1, uvs2):
         if uv1 is None or uv2 is None:
             p3ds.append(None)
+            reproj_errors.append(None)
         else:
-            _p3d = DLT(P1, P2, uv1, uv2)
+            _p3d, _err = DLT_with_reproj(P1, P2, uv1, uv2)
             _p3d=np.ndarray.tolist(_p3d)
             p3ds.append(_p3d)
+            reproj_errors.append(_err)
 
     #these are the 3d points:
-    print(p3ds)
-    return np.array(p3ds)
+    #print(p3ds)
+    return np.array(p3ds), reproj_errors
 
 def detect_corners_pyocamcalib(working_dir, chessboard_size=(8, 11), camera_name="MyCamera", square_size=0.03):
     """

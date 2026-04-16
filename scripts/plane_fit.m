@@ -1,0 +1,85 @@
+coord_filename = "ball_drop_data_3D_trial1.xlsx" %ADD NAME OF BALL DROP FILE WITH 3D COORDS
+imgcoordsRC_all = readtable(coord_filename);
+
+total_final =[];
+for i = 1:length(unique(imgcoordsRC_all{:,"drop_ID"}))
+
+    final = [];
+
+    imgcoordsRC = imgcoordsRC_all(imgcoordsRC_all{:,3} == i, :);
+
+    %% plane fitting
+    %concatenate points
+    ball_points = [imgcoordsRC{1,53}, imgcoordsRC{1,54}, imgcoordsRC{1,55}];
+    eel_points = [imgcoordsRC{:,56},imgcoordsRC{:,57},imgcoordsRC{:,58}];
+    all_points = [eel_points;ball_points]
+    %compute centroid
+    centroid = mean(all_points,1, "omitnan");
+    %subtract centroid
+    points_centered = all_points - centroid;
+    valid = all(~isnan(points_centered), 2);
+    P = points_centered(valid, :);
+    %pca via svd
+    [~,~,V] = svd(P, 0);
+    %Normal vector of plane
+    normal = V(:,3);
+    %Plane equation: normal . (X-centroid) = 0
+    A = normal(1);
+    B = normal(2);
+    C = normal(3);
+    D = -dot(normal,centroid);
+
+    %project points onto the plane
+    projected = zeros(size(all_points));
+
+    for d = 1:size(all_points,1)
+        p = all_points(d,:);
+    
+        % Distance from plane
+        dist = (A*p(1) + B*p(2) + C*p(3) + D) / (A^2 + B^2 + C^2);
+    
+        % Projection
+        projected(d,:) = p - dist * [A, B, C];
+    end
+
+    Xp = projected(:,1);
+    Yp = projected(:,2);
+    Zp = projected(:,3);
+
+    %store results in a table
+    projected_ball = repmat([Xp(end), Yp(end), Zp(end)],(length(Xp)-1),1);
+
+    projected_eel = [Xp(1:end-1),Yp(1:end-1),Zp(1:end-1)];
+
+    newdat = [projected_ball,projected_eel];
+
+    newdat= array2table(newdat, ...
+        'VariableNames', {'ball_x_projected','ball_y_projected','ball_z_projected', ...
+                      'eel_x_projected','eel_y_projected','eel_z_projected'});
+
+    final = [imgcoordsRC, newdat];
+
+    diff = sqrt((final{:,56} - final{:,69}).^2 +  (final{:,57} - final{:,70}).^2 + (final{:,58} - final{:,71}).^2)
+
+    diff = array2table(diff, ...
+        'VariableNames',{'plane_projection_diff'});
+
+    final = [final, diff];
+
+    total_final = [total_final; final];
+
+end
+
+writetable(total_final, coord_filename);
+
+
+%% Visualise a projection  
+figure; hold on; grid on;
+
+scatter3(imgcoordsRC{:,56}, imgcoordsRC{:,57}, imgcoordsRC{:,58}, 20, 'r', 'filled')      % original
+scatter3(imgcoordsRC{:,53}, imgcoordsRC{:,54}, imgcoordsRC{:,55}, 20, 'y', 'filled')
+scatter3(Xp, Yp, Zp, 20, 'b')             % projected
+
+legend('Original','Projected')
+axis equal
+
