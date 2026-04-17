@@ -1054,9 +1054,6 @@ def triangulate(mtx1, mtx2, dist1, dist2, R, T, fishpoints1, fishpoints2):
     uvs1 = fishpoints1
     uvs2 = fishpoints2
 
-    uvs1 = np.atleast_2d(uvs1)
-    uvs2 = np.atleast_2d(uvs2)
-
     # #optional undistortion?
     # uvs1 = cv.undistortPoints(
     # uvs1.reshape(-1,1,2),

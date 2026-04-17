@@ -1,4 +1,4 @@
-coord_filename = "ball_drop_data_3D_trial1.xlsx" %ADD NAME OF BALL DROP FILE WITH 3D COORDS
+coord_filename = "ball_drop_data_3D_trial6.xlsx" %ADD NAME OF BALL DROP FILE WITH 3D COORDS
 imgcoordsRC_all = readtable(coord_filename);
 
 total_final =[];
@@ -6,7 +6,7 @@ for i = 1:length(unique(imgcoordsRC_all{:,"drop_ID"}))
 
     final = [];
 
-    imgcoordsRC = imgcoordsRC_all(imgcoordsRC_all{:,3} == i, :);
+    imgcoordsRC = imgcoordsRC_all(imgcoordsRC_all{:,3} == imgcoordsRC_all{i,"drop_ID"}, :);
 
     %% plane fitting
     %concatenate points

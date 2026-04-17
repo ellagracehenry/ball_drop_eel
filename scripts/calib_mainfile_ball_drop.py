@@ -9,9 +9,9 @@ from calib_functions_ball_drop import *
 #Enter the path to the focal follow csv file.
 CSV_Path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data.xlsx"
 #Enter the path/name for your output csv file.
-Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/final_triangulation/calib_results_trial1.xlsx"
+Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/final_triangulation/calib_results_trial6.xlsx"
 #Path for triangulated points
-output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/final_triangulation/ball_drop_data_3D_trial1.xlsx"
+output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/final_triangulation/ball_drop_data_3D_trial6.xlsx"
 #Base path for frames
 base_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/triangulation_frames"
 
@@ -61,7 +61,7 @@ End_Col2="calib_end_time2"
 Folder_Col1="calib_1_path"
 Folder_Col2="calib_2_path"
 
-df = df[df["trial_ID"] == 1]
+df = df[df["trial_ID"] == 6]
 
 current_trial_id = None
 
@@ -153,11 +153,9 @@ for i, row in df.iterrows():
 
                 # Triangulate single 3D point
                 point_3D, reproj_errors = triangulate(mtx1, mtx2, dist1, dist2, R, T, pts_L, pts_R)
-                print("Successfully triangulated")
 
                 # If your triangulate() returns Nx3 array, extract the first element
                 point_3D = point_3D[0] if len(point_3D.shape) > 1 else point_3D
-                print(point_3D) 
 
                 # Update dataframe values
                 df.at[i, f"{label}_X"] = point_3D[0]
