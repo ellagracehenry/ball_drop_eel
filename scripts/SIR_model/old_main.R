@@ -25,11 +25,8 @@ data <- read_excel("master_ball_drop_data_3D_0216.xlsx") %>%
   filter (drop_ID != 169) %>%
   filter (drop_ID != 146) %>%
   filter(drop_ID != 176) %>%
-  filter(drop_ID != 157) %>%
-  filter(drop_ID != 147) %>%
-  filter(drop_ID != 180) %>%
-  filter(drop_ID != 179)  %>%
-  filter(trial_ID != 5)
+  filter(drop_ID != 157)
+
 
 data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
 data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
@@ -37,8 +34,8 @@ data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
 data$distance_to_ball <- sqrt((data$base_X - data$ball_hit_X)^2 + (data$base_Y - data$ball_hit_Y)^2 + (data$base_Z - data$ball_hit_Z)^2)
 
 data <- data %>%
-  mutate(binary_response = case_when(
-    full_partial_none == 2 ~ 1,
+  mutate(full_partial_none = case_when(
+    full_partial_none == 2 ~ 2,
     full_partial_none == 1 ~ 1,
     full_partial_none == 0 ~ 0,
     TRUE ~ NA_real_
@@ -57,63 +54,52 @@ data <- data %>%
 
 data <- data %>%
   group_by(drop_ID) %>%
-  mutate(first_responder = as.integer(!is.na(response_frame_cam1) & response_frame_cam1 == min(response_frame_cam1, na.rm = TRUE))) %>%
-  mutate(first_index = if (any(full_partial_none !=0 & !is.na(full_partial_none)))
-    which.min(ifelse(full_partial_none !=0 & !is.na(full_partial_none),
-                     response_frame_cam1, Inf))
-    else NA_integer_) %>%
   mutate(
-    rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  # only rank full responders
-                      na.last = "keep", ties.method = "first"),
+    rank_order = {
+      r <- rep(NA_real_, n())
+      responders <- !is.na(full_partial_none) & full_partial_none == 1 & !is.na(response_frame_cam1)
+      r[responders] <- rank(response_frame_cam1[responders], ties.method = "first")
+      r
+    },
     initator = as.integer(rank_order == 1),
+    first_index = match(1, rank_order),
     second_responder = as.integer(rank_order == 2),
-    subsequent_responder = ifelse(is.na(full_partial_none !=0), NA, as.integer(!is.na(rank_order) & rank_order !=1)),
+    subsequent_responder = ifelse(is.na(full_partial_none), NA, as.integer(!is.na(rank_order) & rank_order !=1)),
     first_x = base_X[first_index],
     first_y = base_Y[first_index],
     first_z = base_Z[first_index],
     # Compute distance only for responders
     dist_from_first_resp = ifelse(
-      !is.na(full_partial_none),
+      full_partial_none == 1,
       sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
       NA_real_
-    ),
-    time_lag_since_first =
-      response_frame_cam1 - response_frame_cam1[first_index]
-    ) %>%
+    )) %>%
   ungroup()
-
-#Summarise data for time lag between first and second
-first_pair_time_lag <- data %>% 
-  filter(second_responder == 1) %>% 
-  group_by(drop_ID) %>%
-  filter(sum(time_lag_since_first == 0, na.rm=TRUE) == 0) %>%
-  ungroup()
-
-#%>%
-  #filter(time_lag_since_first > 0)
-
-first_pair_time_lag %>%
-  ggplot(aes(x = time_lag_since_first * (1000/60))) +
-  geom_histogram(binwidth = 3 * (1000/60), color = "black", fill = "lightblue") +
-  labs(x = "Time lag (ms)")
-
-first_pair_time_lag %>%
-  ggplot(aes(x=dist_from_first_resp, y = time_lag_since_first* (1000/60))) +
-  geom_point() +
-  geom_smooth(method ="lm") +
-  labs(y = "Time lag (ms)", x = "Distance from first responder")
 
 
 #Fit a model for initator responder pairs
 #Summarise data by initiator-responder pairs
+# Fit a model for initiator-responder pairs
+# Summarise data by initiator-responder pairs
 initator_responder <- data %>%
   group_by(drop_ID) %>%
-  mutate(responses = sum(full_partial_none > 0, na.rm=TRUE)) %>%
+  mutate(
+    responses = sum(full_partial_none > 0, na.rm = TRUE)
+  ) %>%
   filter(responses > 0 & !is.na(full_partial_none)) %>%
-  mutate(first_index = if (any(full_partial_none != 0 & !is.na(full_partial_none)))
-    which.min(ifelse(full_partial_none != 0 & !is.na(full_partial_none),
-                     response_frame_cam1, Inf))
-    else NA_integer_) %>%
+  mutate(
+    first_index = if (any(full_partial_none != 0 & !is.na(full_partial_none))) {
+      which.min(
+        ifelse(
+          full_partial_none != 0 & !is.na(full_partial_none),
+          response_frame_cam1,
+          Inf
+        )
+      )
+    } else {
+      NA_integer_
+    }
+  ) %>%
   mutate(
     rank_order = rank(response_frame_cam1, na.last = "keep", ties.method = "first"),
     initator = as.integer(rank_order == 1),
@@ -124,13 +110,32 @@ initator_responder <- data %>%
     # Compute distance only for responders
     dist_from_first_resp = ifelse(
       !is.na(full_partial_none),
-      sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
+      sqrt(
+        (base_X - first_x)^2 +
+          (base_Y - first_y)^2 +
+          (base_Z - first_z)^2
+      ),
       NA_real_
-    ), 
+    ),
     time_lag_since_first =
       response_frame_cam1 - response_frame_cam1[first_index]
   ) %>%
   filter(!is.na(dist_from_first_resp) & dist_from_first_resp > 0) %>%
+  ungroup()
+
+
+
+#For histogram
+initator_responder <- data %>%
+  group_by(drop_ID) %>%
+  filter(full_partial_none == 1) %>%   # only responders
+  mutate(
+    rank_order = rank(response_frame_cam1, ties.method = "first"),
+    initator = as.integer(rank_order == 1),
+    second_responder = as.integer(rank_order == 2),
+    first_response_time = min(response_frame_cam1, na.rm = TRUE),
+    time_lag_since_first = response_frame_cam1 - first_response_time
+  ) %>%
   ungroup()
 
 initator_responder <- initator_responder[
@@ -159,6 +164,17 @@ initator_responder$re_colony_eel_ID <- interaction(
 )
 
 initator_responder <- as.data.frame(initator_responder)
+
+initator_responder_only <- initator_responder %>%
+  filter(second_responder == 1)
+
+initator_responder_only %>%
+  ggplot(aes(x=time_lag_since_first))+
+  geom_histogram(binwidth = 3,color="black", fill="lightblue")
+
+initator_responder_only %>%
+  ggplot(aes(x=dist_from_first_resp, y = time_lag_since_first)) +
+  geom_point()
 
 # Create all scaled versions first, OUTSIDE the loop
 initator_responder$dist_sc        <- scale(initator_responder$dist_from_first_resp)
@@ -281,7 +297,7 @@ fr_re_colony <- ranef(fr_model)$colony
 fr_re_colony$combo <- rownames(fr_re_colony)
 
 #2 - Second responder model
-sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder) #add pair identity as random var
+sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
 summary(sr_model)
 #Fixed effects
 sr_intercept <- as.numeric(fixef(sr_model)[1])

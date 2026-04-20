@@ -185,11 +185,28 @@ def cam_calibration(base_path, left_cal_vid, right_cal_vid, left_cal, right_cal,
 
     # Calibrate cameras together:
     print(f"stereocalibrating...")
-    rmse, R, T = stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, cal_dir_L, cal_dir_R)
-    # rmse, R, T = stereo_calibrate_accept_interactive(base_path, cal_dir_L, cal_dir_R, objpoints_cam1, imgpoints_cam1, objpoints_cam2, imgpoints_cam2, mtx1, dist1, mtx2, dist2)
+
+    # # Trial 12 - use intrinsics from trial 2 (best calibration)
+    mtx1_good = np.array([[1.28756315e+03, 0.00000000e+00, 9.18200332e+02],
+                       [0.00000000e+00, 1.28484443e+03, 5.45072820e+02],
+                       [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]])
+
+    dist1_good = np.array([[ 0.49839047,  0.17340749,  0.00957047, -0.02368860, -0.09713041]])
+
+    mtx2_good = np.array([[1.35928116e+03, 0.00000000e+00, 9.06979147e+02],
+                       [0.00000000e+00, 1.36738729e+03, 6.17501783e+02],
+                       [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]])
+
+    dist2_good = np.array([[ 0.38976805,  0.54305831,  0.05857733, -0.01435611, -0.01380362]])
+
+    rmse, R, T, mtx1_good, dist1_good, mtx2_good, dist2_good = stereo_calibrate_fixed_intrinsics(base_path, mtx1_good, dist1_good, mtx2_good, dist2_good, cal_dir_L, cal_dir_R)
+
+    #rmse, R, T = stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, cal_dir_L, cal_dir_R)
+
+    #rmse, R, T = stereo_calibrate_accept_interactive(base_path, cal_dir_L, cal_dir_R, objpoints_cam1, imgpoints_cam1, objpoints_cam2, imgpoints_cam2, mtx1, dist1, mtx2, dist2)
 
     # The baseline (distance between cameras in real-world units)
-    return rmse, mtx1, dist1, mtx2, dist2, R, T
+    return rmse, mtx1_good, dist1_good, mtx2_good, dist2_good, R, T
 
 #Get Frame Rate
 def get_frame_rate(video_path):
@@ -219,7 +236,7 @@ def extract_audio_features(filename1, filename2,fps):
     y1, sr1 = librosa.load(video1, sr=None)
     y2, sr2 = librosa.load(video2, sr=None)
     corr = correlate(y1, y2, mode='full')
-    norm_corr=corr / (np.linalg.norm(corr) * np.linalg.norm(corr))
+    norm_corr=corr / (np.linalg.norm(y1) * np.linalg.norm(y2))
     offset = np.argmax(norm_corr) - (len(y2) - 1)
     # ***Change this if not 24fps:
     offset_frames= round((offset/sr1)*fps)
@@ -230,7 +247,6 @@ def extract_audio_features(filename1, filename2,fps):
         frame_delay=[0,-offset_frames]
     print(frame_delay)
     return frame_delay
-
 
 #call ffmpeg
 #3 frames/second. Start at frame number based on delay
@@ -960,6 +976,81 @@ def stereo_calibrate(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames
     print("Final paired frames used for calibration:", len(objpoints))
 
     return ret, R, T
+
+def stereo_calibrate_fixed_intrinsics(base_path, mtx1, dist1, mtx2, dist2, frames_folder1, frames_folder2):
+    """
+    Use pre-supplied intrinsics (from a good trial) and solve only R and T
+    from the current trial's stereo frames.
+    """
+    images_path1 = os.path.join(base_path, frames_folder1)
+    images_path2 = os.path.join(base_path, frames_folder2)
+
+    valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff')
+
+    c1_images = []
+    c2_images = []
+
+    for im in sorted(os.listdir(images_path1)):
+        if not im.lower().endswith(valid_exts):
+            continue
+        img = cv.imread(os.path.join(images_path1, im), 1)
+        if img is not None:
+            c1_images.append(img)
+
+    for im in sorted(os.listdir(images_path2)):
+        if not im.lower().endswith(valid_exts):
+            continue
+        img = cv.imread(os.path.join(images_path2, im), 1)
+        if img is not None:
+            c2_images.append(img)
+
+    criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    rows, columns, world_scaling = 8, 11, 0.03
+
+    objp = np.zeros((rows*columns, 3), np.float32)
+    objp[:,:2] = np.mgrid[0:columns, 0:rows].T.reshape(-1, 2)
+    objp *= world_scaling
+
+    width = c1_images[0].shape[1]
+    height = c1_images[0].shape[0]
+
+    imgpoints_left = []
+    imgpoints_right = []
+    objpoints = []
+    count = 0
+
+    for frame1, frame2 in zip(c1_images, c2_images):
+        gray1 = cv.cvtColor(frame1, cv.COLOR_BGR2GRAY)
+        gray2 = cv.cvtColor(frame2, cv.COLOR_BGR2GRAY)
+        c_ret1, corners1 = cv.findChessboardCornersSB(gray1, (columns, rows),
+            cv.CALIB_CB_ADAPTIVE_THRESH | cv.CALIB_CB_NORMALIZE_IMAGE | cv.CALIB_CB_EXHAUSTIVE)
+        c_ret2, corners2 = cv.findChessboardCornersSB(gray2, (columns, rows),
+            cv.CALIB_CB_ADAPTIVE_THRESH | cv.CALIB_CB_NORMALIZE_IMAGE | cv.CALIB_CB_EXHAUSTIVE)
+
+        if c_ret1 and c_ret2:
+            count += 1
+            corners1 = cv.cornerSubPix(gray1, corners1, (5,5), (-1,-1), criteria)
+            corners2 = cv.cornerSubPix(gray2, corners2, (5,5), (-1,-1), criteria)
+            objpoints.append(objp.copy())
+            imgpoints_left.append(corners1)
+            imgpoints_right.append(corners2)
+
+    print(f"Stereo pairs found: {count}")
+
+    ret, CM1, dist1_out, CM2, dist2_out, R, T, E, F = cv.stereoCalibrate(
+        objpoints, imgpoints_left, imgpoints_right,
+        mtx1, dist1, mtx2, dist2,
+        (width, height),
+        criteria=criteria,
+        flags=cv.CALIB_FIX_INTRINSIC
+    )
+
+    print(f"Stereo RMSE with borrowed intrinsics: {ret}")
+    print(f"Camera distance: {np.linalg.norm(T):.3f}m")
+    print(f"R:\n{R}")
+    print(f"T:\n{T}")
+
+    return ret, R, T, mtx1, dist1, mtx2, dist2
 
 def stereo_calibrate_accept_interactive(
     base_path,

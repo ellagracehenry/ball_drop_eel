@@ -13,23 +13,12 @@ library(glmmLasso)
 library(tibble)
 library(stringr)
 
-#Some drops the first response frame is before the ball enters view, filter these. - 176
-#Fish in frame - 146
-#Some have far apart second and first because eel across the group started to hide but it seems like the others don't see - 168, 40
-#Tangled line - 157
-
 #Data manipulation
 setwd("~/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment")
 data <- read_excel("master_ball_drop_data_3D_0216.xlsx") %>%
   filter(drop_ID != 152) %>%
-  filter (drop_ID != 169) %>%
-  filter (drop_ID != 146) %>%
-  filter(drop_ID != 176) %>%
-  filter(drop_ID != 157) %>%
-  filter(drop_ID != 147) %>%
-  filter(drop_ID != 180) %>%
-  filter(drop_ID != 179)  %>%
-  filter(trial_ID != 5)
+  filter (drop_ID != 169)
+
 
 data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
 data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
@@ -58,16 +47,15 @@ data <- data %>%
 data <- data %>%
   group_by(drop_ID) %>%
   mutate(first_responder = as.integer(!is.na(response_frame_cam1) & response_frame_cam1 == min(response_frame_cam1, na.rm = TRUE))) %>%
-  mutate(first_index = if (any(full_partial_none !=0 & !is.na(full_partial_none)))
-    which.min(ifelse(full_partial_none !=0 & !is.na(full_partial_none),
+  mutate(first_index = if (any(full_partial_none != 0 & !is.na(full_partial_none)))
+    which.min(ifelse(full_partial_none != 0 & !is.na(full_partial_none),
                      response_frame_cam1, Inf))
     else NA_integer_) %>%
   mutate(
-    rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  # only rank full responders
-                      na.last = "keep", ties.method = "first"),
+    rank_order = rank(response_frame_cam1, na.last = "keep", ties.method = "first"),
     initator = as.integer(rank_order == 1),
     second_responder = as.integer(rank_order == 2),
-    subsequent_responder = ifelse(is.na(full_partial_none !=0), NA, as.integer(!is.na(rank_order) & rank_order !=1)),
+    subsequent_responder = ifelse(is.na(full_partial_none), NA, as.integer(!is.na(rank_order) & rank_order !=1)),
     first_x = base_X[first_index],
     first_y = base_Y[first_index],
     first_z = base_Z[first_index],
@@ -76,32 +64,8 @@ data <- data %>%
       !is.na(full_partial_none),
       sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
       NA_real_
-    ),
-    time_lag_since_first =
-      response_frame_cam1 - response_frame_cam1[first_index]
-    ) %>%
+    )) %>%
   ungroup()
-
-#Summarise data for time lag between first and second
-first_pair_time_lag <- data %>% 
-  filter(second_responder == 1) %>% 
-  group_by(drop_ID) %>%
-  filter(sum(time_lag_since_first == 0, na.rm=TRUE) == 0) %>%
-  ungroup()
-
-#%>%
-  #filter(time_lag_since_first > 0)
-
-first_pair_time_lag %>%
-  ggplot(aes(x = time_lag_since_first * (1000/60))) +
-  geom_histogram(binwidth = 3 * (1000/60), color = "black", fill = "lightblue") +
-  labs(x = "Time lag (ms)")
-
-first_pair_time_lag %>%
-  ggplot(aes(x=dist_from_first_resp, y = time_lag_since_first* (1000/60))) +
-  geom_point() +
-  geom_smooth(method ="lm") +
-  labs(y = "Time lag (ms)", x = "Distance from first responder")
 
 
 #Fit a model for initator responder pairs
@@ -281,7 +245,7 @@ fr_re_colony <- ranef(fr_model)$colony
 fr_re_colony$combo <- rownames(fr_re_colony)
 
 #2 - Second responder model
-sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder) #add pair identity as random var
+sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
 summary(sr_model)
 #Fixed effects
 sr_intercept <- as.numeric(fixef(sr_model)[1])
@@ -992,90 +956,3 @@ ggplot(all_timing, aes(x = source, y = relative_frame, fill = source)) +
 
 
 #Time series subset
-library(tidyverse)
-library(ggplot2)
-
-DROP_SUBSET <- unique(data$drop_ID)[1:8]
-
-# ── Max frame from subset only ───────────────────────────────────────────────
-max_frame <- data %>%
-  filter(drop_ID %in% DROP_SUBSET,
-         !is.na(response_frame_cam1)) %>%
-  group_by(drop_ID) %>%
-  mutate(first_frame    = min(response_frame_cam1, na.rm = TRUE),
-         relative_frame = response_frame_cam1 - first_frame + 1) %>%
-  ungroup() %>%
-  summarise(max_rf = max(relative_frame, na.rm = TRUE)) %>%
-  pull(max_rf)
-
-# ── Observed (per frame) ─────────────────────────────────────────────────────
-obs_long <- data %>%
-  filter(drop_ID %in% DROP_SUBSET,
-         !is.na(full_partial_none),
-         !is.na(base_x_cam1),
-         !is.na(base_x_cam2),
-         !is.na(response_frame_cam1)) %>%
-  group_by(drop_ID) %>%
-  mutate(first_frame    = min(response_frame_cam1, na.rm = TRUE),
-         relative_frame = response_frame_cam1 - first_frame + 1) %>%
-  ungroup() %>%
-  group_by(drop_ID, relative_frame) %>%
-  summarise(n_hides = n_distinct(colony_eel_ID), .groups = "drop") %>%
-  mutate(model = "Observed")
-
-# ── Social model (per frame, no scaling) ─────────────────────────────────────
-social_long <- map_dfr(DROP_SUBSET, function(did) {
-  sims <- social_frame_recorder_list[[as.character(did)]]
-  if (is.null(sims)) return(NULL)
-  
-  map_dfr(seq_along(sims), function(s) {
-    sim <- sims[[s]]
-    if (is.null(sim) || all(is.na(sim))) return(NULL)
-    
-    frames <- sim[!is.na(sim)]
-    first  <- min(frames)
-    
-    tibble(
-      drop_ID = did,
-      relative_frame = (frames - first + 1),
-      sim = s
-    )
-  })
-}) %>%
-  group_by(drop_ID, relative_frame, sim) %>%
-  summarise(n_hides = n(), .groups = "drop") %>%
-  group_by(drop_ID, relative_frame) %>%
-  summarise(n_hides = mean(n_hides), .groups = "drop") %>%
-  mutate(model = "Social model")
-
-# ── Combine and fill missing frames ──────────────────────────────────────────
-plot_data <- bind_rows(obs_long, social_long) %>%
-  complete(drop_ID = DROP_SUBSET,
-           relative_frame = 1:max_frame,
-           model = c("Observed", "Social model"),
-           fill = list(n_hides = 0)) %>%
-  mutate(model = factor(model, levels = c("Observed", "Social model")))
-
-# ── Plot ─────────────────────────────────────────────────────────────────────
-ggplot(plot_data, aes(x = relative_frame,
-                      y = factor(drop_ID),
-                      fill = n_hides)) +
-  geom_tile() +
-  facet_grid(model ~ ., scales = "free_y", space = "free_y") +
-  scale_fill_gradient(
-    low  = "#e8f4f8",
-    high = "#042c53",
-    name = "Eels hiding"
-  ) +
-  scale_x_continuous(
-    name = "Frame (relative to first responder)",
-    breaks = seq(0, max_frame, by = 10),  # adjust spacing if needed
-    expand = c(0, 0)
-  ) +
-  labs(y = "Drop ID") +
-  theme_minimal(base_size = 12) +
-  theme(
-    strip.text      = element_text(face = "bold"),
-    panel.grid      = element_blank(),
-    panel.spacing.y = unit(0.8, "lines")
-  )
