@@ -19,8 +19,8 @@ library(stringr)
 #Tangled line - 157
 
 #Data manipulation
-setwd("~/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment")
-data <- read_excel("master_ball_drop_data_3D_0216.xlsx") %>%
+setwd("/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/ball_drop_garden_eel/triangulation/final_triangulation")
+data <- read_excel("final_master_ball_drop_3D.xlsx") %>%
   filter(drop_ID != 152) %>%
   filter (drop_ID != 169) %>%
   filter (drop_ID != 146) %>%
@@ -29,7 +29,8 @@ data <- read_excel("master_ball_drop_data_3D_0216.xlsx") %>%
   filter(drop_ID != 147) %>%
   filter(drop_ID != 180) %>%
   filter(drop_ID != 179)  %>%
-  filter(trial_ID != 5)
+  filter(trial_ID != 5) %>%
+  filter(drop_ID != 173) #missing response frame data, have asked Megan to readd
 
 data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
 data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
@@ -55,25 +56,31 @@ data <- data %>%
   mutate(inst_emerged = sum(!is.na(full_partial_none))) %>%
   ungroup()
 
+#True ordering
 data <- data %>%
   group_by(drop_ID) %>%
-  mutate(first_responder = as.integer(!is.na(response_frame_cam1) & response_frame_cam1 == min(response_frame_cam1, na.rm = TRUE))) %>%
+  mutate(first_responder = as.integer(!is.na(response_frame_cam1) & response_frame_cam1 == min(response_frame_cam1, na.rm = TRUE)), emerged = as.integer(!is.na(full_partial_none))) %>%
   mutate(first_index = if (any(full_partial_none !=0 & !is.na(full_partial_none)))
     which.min(ifelse(full_partial_none !=0 & !is.na(full_partial_none),
                      response_frame_cam1, Inf))
     else NA_integer_) %>%
   mutate(
+    any_response = any(full_partial_none != 0 & !is.na(full_partial_none)), 
     rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  # only rank full responders
                       na.last = "keep", ties.method = "first"),
     initator = as.integer(rank_order == 1),
-    second_responder = as.integer(rank_order == 2),
-    subsequent_responder = ifelse(is.na(full_partial_none !=0), NA, as.integer(!is.na(rank_order) & rank_order !=1)),
+    second_responder = case_when(!any_response ~ NA_real_, rank_order == 1 ~ NA, rank_order == 2 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+    third_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2) ~ NA, rank_order == 3 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+    fourth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3) ~ NA, rank_order == 4 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+    fifth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4)  ~ NA, rank_order == 5 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+    sixth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4,5)  ~ NA, rank_order == 6 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+    subsequent_responder = case_when(!any_response ~ NA_real_, emerged == 0 ~ NA_real_, rank_order == 1 ~ NA_real_, binary_response == 0 ~ 0, rank_order > 1 ~ 1),
     first_x = base_X[first_index],
     first_y = base_Y[first_index],
     first_z = base_Z[first_index],
-    # Compute distance only for responders
+    # Compute distance only for emerged
     dist_from_first_resp = ifelse(
-      !is.na(full_partial_none),
+      !is.na(subsequent_responder),
       sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
       NA_real_
     ),
@@ -81,6 +88,115 @@ data <- data %>%
       response_frame_cam1 - response_frame_cam1[first_index]
     ) %>%
   ungroup()
+
+
+#Incorporating time lag. Need to move everyone up a rank
+data <- data %>%
+  group_by(drop_ID) %>%
+  
+  mutate(
+    emerged = as.integer(!is.na(full_partial_none)),
+    any_response = any(full_partial_none != 0 & !is.na(full_partial_none)),
+    
+    # initiator (true first response)
+    first_index = if (any(full_partial_none != 0 & !is.na(full_partial_none)))
+      which.min(ifelse(full_partial_none != 0 & !is.na(full_partial_none),
+                       response_frame_cam1, Inf))
+    else NA_integer_,
+    
+    initiator_frame = response_frame_cam1[first_index],
+    
+    # time from initiator
+    time_from_init = response_frame_cam1 - initiator_frame
+  ) %>%
+  
+  mutate(
+    # ORIGINAL chronological order (unchanged)
+    raw_rank = rank(
+      ifelse(full_partial_none != 0, response_frame_cam1, NA),
+      na.last = "keep",
+      ties.method = "first"
+    ),
+    
+    # NEW RULE:
+    # everyone within 5 frames of initiator becomes rank 1
+    rank_order = case_when(
+      is.na(raw_rank) ~ NA_real_,
+      time_from_init <= 3 ~ 1,
+      TRUE ~ raw_rank
+    )
+  ) %>%
+  
+  mutate(
+    initiator = as.integer(raw_rank == 1),
+    
+    # all fast responders collapse into FIRST RESPONDER group
+    first_responder = as.integer(rank_order == 1),
+    
+    second_responder = case_when(
+      !any_response ~ NA_real_,
+      rank_order == 1 ~ NA,
+      rank_order == 2 ~ 1,
+      emerged == 1 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    third_responder = case_when(
+      !any_response ~ NA_real_,
+      rank_order %in% c(1,2) ~ NA,
+      rank_order == 3 ~ 1,
+      emerged == 1 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    fourth_responder = case_when(
+      !any_response ~ NA_real_,
+      rank_order %in% c(1,2,3) ~ NA,
+      rank_order == 4 ~ 1,
+      emerged == 1 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    fifth_responder = case_when(
+      !any_response ~ NA_real_,
+      rank_order %in% c(1,2,3,4) ~ NA,
+      rank_order == 5 ~ 1,
+      emerged == 1 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    sixth_responder = case_when(
+      !any_response ~ NA_real_,
+      rank_order %in% c(1,2,3,4,5) ~ NA,
+      rank_order == 6 ~ 1,
+      emerged == 1 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    subsequent_responder = case_when(
+      !any_response ~ NA_real_,
+      emerged == 0 ~ NA_real_,
+      rank_order == 1 ~ NA_real_,
+      binary_response == 0 ~ 0,
+      rank_order > 1 ~ 1
+    ),
+    
+    first_x = base_X[first_index],
+    first_y = base_Y[first_index],
+    first_z = base_Z[first_index],
+    
+    dist_from_first_resp = ifelse(
+      !is.na(subsequent_responder),
+      sqrt((base_X - first_x)^2 +
+             (base_Y - first_y)^2 +
+             (base_Z - first_z)^2),
+      NA_real_
+    ),
+    
+    time_lag_since_first = time_from_init
+  ) %>%
+  ungroup()
+
 
 #Summarise data for time lag between first and second
 first_pair_time_lag <- data %>% 
@@ -105,37 +221,11 @@ first_pair_time_lag %>%
 
 
 #Fit a model for initator responder pairs
-#Summarise data by initiator-responder pairs
-initator_responder <- data %>%
-  group_by(drop_ID) %>%
-  mutate(responses = sum(full_partial_none > 0, na.rm=TRUE)) %>%
-  filter(responses > 0 & !is.na(full_partial_none)) %>%
-  mutate(first_index = if (any(full_partial_none != 0 & !is.na(full_partial_none)))
-    which.min(ifelse(full_partial_none != 0 & !is.na(full_partial_none),
-                     response_frame_cam1, Inf))
-    else NA_integer_) %>%
-  mutate(
-    rank_order = rank(response_frame_cam1, na.last = "keep", ties.method = "first"),
-    initator = as.integer(rank_order == 1),
-    second_responder = as.integer(rank_order == 2),
-    first_x = base_X[first_index],
-    first_y = base_Y[first_index],
-    first_z = base_Z[first_index],
-    # Compute distance only for responders
-    dist_from_first_resp = ifelse(
-      !is.na(full_partial_none),
-      sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
-      NA_real_
-    ), 
-    time_lag_since_first =
-      response_frame_cam1 - response_frame_cam1[first_index]
-  ) %>%
-  filter(!is.na(dist_from_first_resp) & dist_from_first_resp > 0) %>%
-  ungroup()
+initator_responder <- data
 
 initator_responder <- initator_responder[
   complete.cases(initator_responder[,c(
-    "second_responder",
+    #"second_responder",
     "dist_from_first_resp",
     "trial_ID",
     "distance_to_ball"
@@ -166,8 +256,13 @@ initator_responder$ball_sc        <- scale(initator_responder$distance_to_ball)
 initator_responder$log_dist_sc    <- scale(log(initator_responder$dist_from_first_resp))
 initator_responder$log_ball_sc    <- scale(log(initator_responder$distance_to_ball))
 
+initator_responder$dist_sc <- as.numeric(initator_responder$dist_sc)
+initator_responder$ball_sc <- as.numeric(initator_responder$ball_sc)
+
+initator_responder <- initator_responder[!is.na(initator_responder$second_responder), ]
+
 # testing random effects structure
-intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony/eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
+intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony/eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(intercepts_random_model)
 
 #test model
@@ -184,7 +279,7 @@ summary(test_model)
 
 
 ####
-lambda      <- 10^seq(-3, 3, length = 50)
+lambda      <- 10^seq(-4, 2, length = 50)
 devianz_vec <- rep(Inf, length(lambda))
 coeff_ma    <- NULL
 
@@ -281,8 +376,9 @@ fr_re_colony <- ranef(fr_model)$colony
 fr_re_colony$combo <- rownames(fr_re_colony)
 
 #2 - Second responder model
-sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder) #add pair identity as random var
+sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data) #add pair identity as random var
 summary(sr_model)
+
 #Fixed effects
 sr_intercept <- as.numeric(fixef(sr_model)[1])
 sr_b_dist_first <- as.numeric(fixef(sr_model)[3])
@@ -298,7 +394,7 @@ sr_re_colony <- ranef(sr_model)$colony
 sr_re_colony$combo <- rownames(sr_re_colony)
 
 #3 - Subsequent responder model
-subs_model <- glmer(subsequent_responder ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
+subs_model <- glmer(subsequent_responder ~ distance_to_ball + dist_from_first_resp + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(subs_model)
 #Fixed effects
 subs_intercept <- as.numeric(fixef(subs_model)[1])
@@ -316,8 +412,9 @@ subs_re_colony$combo <- rownames(subs_re_colony)
 
 n_drops <- length(unique(data$drop_ID))
 
-#weight strengths... come back to this
+#Model fit weight strengths (option 1)
 weight_strengths <- vector(mode="list", length = length(unique(data$colony)))
+colony_distances <- vector(mode="list", length = length(unique(data$colony)))
 
 for (c in 1:length(unique(data$colony))) {
   
@@ -389,7 +486,7 @@ for (c in 1:length(unique(data$colony))) {
   trial_distances_mean <- trial_distances_sum / trial_distances_count
   trial_distances_mean[trial_distances_count == 0] <- NA
   
-  trial_distances_mean <- apply(trial_distances_mean, 
+  trial_distances_mean_lin_pred <- apply(trial_distances_mean, 
                                 c(1,2), 
                                 function(x) {
                                   if (!is.na(x)) {
@@ -398,12 +495,247 @@ for (c in 1:length(unique(data$colony))) {
                                     NA }
                                 })
   
-  weight_strengths[[c]] <- trial_distances_mean
+  weight_strengths[[c]] <- trial_distances_mean_lin_pred
+  
+  #Convert distance matrix to pairwise distance list
+  xy <- t(combn(colnames(trial_distances_mean),2))
+  xy_rev <- xy[, c(2, 1)]
+  xy_all <- rbind(xy, xy_rev)
+  xy_dist <- data.frame(xy_all, dist = trial_distances_mean[xy_all])
+  colony_distances[[c]] <- xy_dist
+  
 }
 
+colony_distances_all <- bind_rows(colony_distances)
 
-#Threshold strengths
-theta <- runif(n_eels) #not using right now, fixed
+#Empirical weight strengths for specific pairs of subs responders
+pairs_all <- vector(mode="list", length = length(unique(data$colony)))
+
+for (c in 1:length(unique(data$colony))) {
+  #filter out that colony data
+  data_colony <- data %>%
+    filter(colony == unique(data$colony)[c])
+  
+  # get the full set of eel IDs for this colony
+  all_eels <- unique(data_colony$colony_eel_ID)
+  
+  #grid of all eels
+  pairs <- expand.grid(initator = all_eels, responder = all_eels)
+  
+  #remove rows where inititor and responder are same
+  pairs <- subset(pairs, initator != responder)
+  pairs$weight <- 0
+  
+  for (cc in 1:nrow(pairs)) {
+  weight <- 0
+    #count up the number of drops in which i initated and j was present (a)
+    filter_rows <- data_colony %>%
+      group_by(drop_ID) %>%
+      #filter(colony_eel_ID == pairs$initator[cc] | colony_eel_ID == pairs$responder[cc]) %>% #only the rows where it is initiator or responder
+      filter( #only where first responder is initator and responder is not NA
+        any(colony_eel_ID == pairs$initator[cc] & rank_order == 1) &
+        any(colony_eel_ID == pairs$responder[cc] & emerged == 1)
+      ) %>%
+      ungroup()
+        
+    n_qual <- 0
+    
+    if (nrow(filter_rows) != 0) {
+      #count the number of qualifying drops
+      n_qual <- length(unique(filter_rows$drop_ID))
+      #did the responder respond
+      n_response <- filter_rows %>%
+        group_by(drop_ID) %>%
+        summarise(j_third = any(colony_eel_ID == pairs$responder[cc] &
+                                   second_responder == 1)) %>%
+        summarise(sum(j_third)) %>%
+        pull()
+      weight <- n_response/n_qual
+    } else {
+      weight <- NA
+
+    }
+    
+    
+    pairs$n_qual[cc] <- n_qual
+    pairs$weight[cc] <- weight
+  }
+  
+  pairs_all[[c]] <- pairs  
+}
+
+pairs_df <- bind_rows(pairs_all)
+colnames(pairs_df) <- c("X1","X2","weight","n_qual")
+
+colony_distances 
+    
+# Join each direction separately then bind
+final <- bind_rows(
+  left_join(pairs_df, colony_distances_all, by = c("X1", "X2")),
+  #left_join(pairs_df, colony_distances_all, by = c("X1" = "X2", "X2" = "X1"))
+) %>% 
+  distinct() %>%
+  filter(n_qual > 0)  # remove pairs with no distance (never co-occurred in trials)
+
+final %>%
+  ggplot(aes(x = dist, y = weight, color = n_qual)) +
+  geom_point(alpha =0.8) +
+  geom_smooth(
+  )
+
+
+#Empirical weight strengths for initiator responder pairs
+pairs_all <- vector(mode="list", length = length(unique(data$colony)))
+
+for (c in 1:length(unique(data$colony))) {
+  #filter out that colony data
+  data_colony <- data %>%
+    filter(colony == unique(data$colony)[c])
+  
+  # get the full set of eel IDs for this colony
+  all_eels <- unique(data_colony$colony_eel_ID)
+  
+  #grid of all eels
+  pairs <- expand.grid(initator = all_eels, responder = all_eels)
+  
+  #remove rows where inititor and responder are same
+  pairs <- subset(pairs, initator != responder)
+  pairs$weight <- 0
+  
+  for (cc in 1:nrow(pairs)) {
+    weight <- 0
+    #count up the number of drops in which i initated and j was present (a)
+    filter_rows <- data_colony %>%
+      group_by(drop_ID) %>%
+      #filter(colony_eel_ID == pairs$initator[cc] | colony_eel_ID == pairs$responder[cc]) %>% #only the rows where it is initiator or responder
+      filter( #only where first responder is initator and responder is not NA
+        any(colony_eel_ID == pairs$initator[cc] & first_responder == 1) &
+          any(colony_eel_ID == pairs$responder[cc] & !is.na(full_partial_none))
+      ) %>%
+      ungroup()
+    
+    n_qual <- 0
+    
+    if (nrow(filter_rows) != 0) {
+      #count the number of qualifying drops
+      n_qual <- length(unique(filter_rows$drop_ID))
+      #did the responder respond
+      n_response <- filter_rows %>%
+        group_by(drop_ID) %>%
+        summarise(j_second = any(colony_eel_ID == pairs$responder[cc] &
+                                   second_responder == 1)) %>%
+        summarise(sum(j_second)) %>%
+        pull()
+      weight <- n_response/n_qual
+    } else {
+      weight <- NA
+      
+    }
+    
+    
+    pairs$n_qual[cc] <- n_qual
+    pairs$weight[cc] <- weight
+  }
+  
+  pairs_all[[c]] <- pairs  
+}
+
+pairs_df <- bind_rows(pairs_all)
+colnames(pairs_df) <- c("X1","X2","weight","n_qual")
+
+colony_distances 
+
+# Join each direction separately then bind
+final <- bind_rows(
+  left_join(pairs_df, colony_distances_all, by = c("X1", "X2")),
+  #left_join(pairs_df, colony_distances_all, by = c("X1" = "X2", "X2" = "X1"))
+) %>% 
+  distinct() %>%
+  filter(n_qual > 1)  # remove pairs with no distance (never co-occurred in trials)
+
+final %>%
+  ggplot(aes(x = dist, y = weight, color = n_qual)) +
+  geom_jitter(alpha =0.8, height = 0.03) +
+  geom_smooth(method = "lm")
+
+data_f <- data %>%
+  filter(first_responder != 1)
+
+
+#Empirical weight strengths for every subseuqent pair
+pairs_all <- vector(mode="list", length = length(unique(data$colony)))
+
+for (c in 1:length(unique(data$colony))) {
+  #filter out that colony data
+  data_colony <- data %>%
+    filter(colony == unique(data$colony)[c])
+  
+  # get the full set of eel IDs for this colony
+  all_eels <- unique(data_colony$colony_eel_ID)
+  
+  #grid of all eels
+  pairs <- expand.grid(initiator = all_eels, responder = all_eels)
+  
+  #remove rows where inititor and responder are same
+  pairs <- subset(pairs, initiator != responder)
+  pairs$weight <- 0
+  
+  for (cc in 1:nrow(pairs)) {
+    weight <- 0
+    #count up the number of drops in which i initated and j was present (a)
+    filter_rows <- data_colony %>%
+      group_by(drop_ID) %>%
+      #filter(colony_eel_ID == pairs$initator[cc] | colony_eel_ID == pairs$responder[cc]) %>% #only the rows where it is initiator or responder
+      filter( #only where first responder is initator and responder is not NA
+        any(colony_eel_ID == pairs$initiator[cc] & !is.na(full_partial_none)) &
+          any(colony_eel_ID == pairs$responder[cc] & !is.na(full_partial_none))
+      ) %>%
+      ungroup()
+    
+    n_qual <- 0
+    
+    if (nrow(filter_rows) != 0) {
+      #count the number of qualifying drops
+      n_qual <- length(unique(filter_rows$drop_ID))
+      #did the responder respond
+      n_response <- filter_rows %>%
+        arrange(drop_ID, rank_order) %>%
+        group_by(drop_ID) %>%
+        summarise(j_after_i = any(colony_eel_ID == pairs$initiator[cc] &
+                                   lead(colony_eel_ID) == pairs$responder[cc])) %>%
+        summarise(sum(j_after_i)) %>%
+        pull()
+      weight <- n_response/n_qual
+    } else {
+      weight <- NA
+      
+    }
+    
+    
+    pairs$n_qual[cc] <- n_qual
+    pairs$weight[cc] <- weight
+  }
+  
+  pairs_all[[c]] <- pairs  
+}
+
+pairs_df <- bind_rows(pairs_all)
+colnames(pairs_df) <- c("X1","X2","weight","n_qual")
+
+# Join each direction separately then bind
+final <- bind_rows(
+  left_join(pairs_df, colony_distances_all, by = c("X1", "X2")),
+  #left_join(pairs_df, colony_distances_all, by = c("X1" = "X2", "X2" = "X1"))
+) %>% 
+  distinct() %>%
+  filter(n_qual > 0)  # remove depending on n_qual
+
+final %>%
+  ggplot(aes(x = dist, y = weight, color = n_qual)) +
+  geom_jitter(alpha =0.8) #+
+  #geom_smooth()
+
+alptheta <- runif(n_eels) #not using right now, fixed
 
 #Frame range of cascades
 ranges <- data %>%
