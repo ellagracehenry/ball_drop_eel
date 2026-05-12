@@ -12,6 +12,7 @@ library(lme4)
 library(glmmLasso)
 library(tibble)
 library(stringr)
+library(pracma)
 
 #Some drops the first response frame is before the ball enters view, filter these. - 176
 #Fish in frame - 146
@@ -28,14 +29,103 @@ data <- read_excel("final_master_ball_drop_3D.xlsx") %>%
   filter(drop_ID != 157) %>%
   filter(drop_ID != 147) %>%
   filter(drop_ID != 180) %>%
-  filter(drop_ID != 179)  %>%
+  filter(drop_ID != 179) %>%
   filter(trial_ID != 5) %>%
-  filter(drop_ID != 173) #missing response frame data, have asked Megan to readd
+  filter(drop_ID != 173) %>%
+  filter(trial_ID != 17)
 
 data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
 data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
 
+
 data$distance_to_ball <- sqrt((data$base_X - data$ball_hit_X)^2 + (data$base_Y - data$ball_hit_Y)^2 + (data$base_Z - data$ball_hit_Z)^2)
+
+
+#Computing global distances
+
+# --- reference trials per colony ---
+ref_trials <- c("S5" = 1, "S9" = 2, "S15" = 7, "S12" = 13, "S7" = 17)
+
+# Step 1: get global eel positions from reference trial only
+global_positions <- data %>%
+  # cleaner way:
+  filter(paste(colony, trial_ID) %in% paste(names(ref_trials), ref_trials)) %>%
+  group_by(colony_eel_ID) %>%
+  summarise(
+    global_X = mean(base_X, na.rm = TRUE),
+    global_Y = mean(base_Y, na.rm = TRUE),
+    global_Z = mean(base_Z, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# join global positions onto every row
+data <- data %>%
+  left_join(global_positions, by = "colony_eel_ID")
+
+
+# --- rigid transform function ---
+rigid_transform_3D <- function(source_pts, target_pts) {
+  source_centroid <- colMeans(source_pts)
+  target_centroid <- colMeans(target_pts)
+  A <- sweep(source_pts, 2, source_centroid)
+  B <- sweep(target_pts, 2, target_centroid)
+  H <- t(A) %*% B
+  svd_H <- svd(H)
+  R <- svd_H$v %*% t(svd_H$u)
+  if (det(R) < 0) {
+    svd_H$v[, 3] <- -svd_H$v[, 3]
+    R <- svd_H$v %*% t(svd_H$u)
+  }
+  t_vec <- target_centroid - R %*% source_centroid
+  list(R = R, t = t_vec)
+}
+
+
+# Step 2: transform ball per drop using 3 eels closest to ball
+ball_global <- data %>%
+  group_by(drop_ID) %>%
+  group_modify(~ {
+    
+    drop_data <- .x
+    
+    # eels with both drop-space AND global positions, sorted by distance to ball
+    landmarks <- drop_data %>%
+      filter(!is.na(base_X), !is.na(global_X), !is.na(distance_to_ball)) %>%
+      filter(base_reproj_error < 5) %>%  # only well-triangulated eels as landmarks
+      slice_min(distance_to_ball, n = 3, with_ties = FALSE)
+    
+    if (nrow(landmarks) < 3) {
+      return(tibble(
+        ball_global_X  = NA_real_,
+        ball_global_Y  = NA_real_,
+        ball_global_Z  = NA_real_,
+        n_landmarks    = nrow(landmarks),
+        transform_rmse = NA_real_
+      ))
+    }
+    
+    source_pts <- as.matrix(landmarks[, c("base_X",   "base_Y",   "base_Z")])
+    target_pts <- as.matrix(landmarks[, c("global_X", "global_Y", "global_Z")])
+    
+    tf <- rigid_transform_3D(source_pts, target_pts)
+    
+    # transform ball
+    ball <- as.numeric(drop_data[1, c("ball_hit_X", "ball_hit_Y", "ball_hit_Z")])
+    ball_t <- as.numeric(tf$R %*% ball + tf$t)
+  
+    tibble(
+      ball_global_X  = ball_t[1],
+      ball_global_Y  = ball_t[2],
+      ball_global_Z  = ball_t[3]
+    )
+  }) %>%
+  ungroup()
+
+# join back onto data
+data <- data %>%
+  left_join(ball_global, by = "drop_ID")
+
+data$distance_to_ball <- sqrt((data$global_X - data$ball_global_X)^2 + (data$global_Y - data$ball_global_Y)^2 + (data$global_Z - data$ball_global_Z)^2)
 
 data <- data %>%
   mutate(binary_response = case_when(
@@ -75,13 +165,13 @@ data <- data %>%
     fifth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4)  ~ NA, rank_order == 5 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
     sixth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4,5)  ~ NA, rank_order == 6 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
     subsequent_responder = case_when(!any_response ~ NA_real_, emerged == 0 ~ NA_real_, rank_order == 1 ~ NA_real_, binary_response == 0 ~ 0, rank_order > 1 ~ 1),
-    first_x = base_X[first_index],
-    first_y = base_Y[first_index],
-    first_z = base_Z[first_index],
+    first_x = global_X[first_index],
+    first_y = global_Y[first_index],
+    first_z = global_Z[first_index],
     # Compute distance only for emerged
     dist_from_first_resp = ifelse(
       !is.na(subsequent_responder),
-      sqrt((base_X - first_x)^2 + (base_Y - first_y)^2 + (base_Z - first_z)^2),
+      sqrt((global_X - first_x)^2 + (global_Y - first_y)^2 + (global_Z - first_z)^2),
       NA_real_
     ),
     time_lag_since_first =
