@@ -32,7 +32,8 @@ data <- read_excel("final_master_ball_drop_3D.xlsx") %>%
   filter(drop_ID != 179) %>%
   filter(trial_ID != 5) %>%
   filter(drop_ID != 173) %>%
-  filter(trial_ID != 17) #needs correcting annotations
+  filter(trial_ID != 17)%>% #needs correcting annotations %>%
+filter(drop_ID != 149)  #two 156s?
 
 data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
 data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
@@ -50,7 +51,7 @@ ref_trials <- c("S5" = 1, "S9" = 2, "S15" = 7, "S12" = 13, "S7" = 17)
 global_positions <- data %>%
   # cleaner way:
   filter(paste(colony, trial_ID) %in% paste(names(ref_trials), ref_trials)) %>%
-  group_by(colony_eel_ID) %>%
+  group_by(colony, colony_eel_ID) %>%
   summarise(
     global_X = mean(base_X, na.rm = TRUE),
     global_Y = mean(base_Y, na.rm = TRUE),
@@ -60,7 +61,7 @@ global_positions <- data %>%
 
 # join global positions onto every row
 data <- data %>%
-  left_join(global_positions, by = "colony_eel_ID")
+  left_join(global_positions, by = c("colony","colony_eel_ID"))
 
 
 # --- rigid transform function ---
@@ -174,46 +175,42 @@ data <- data %>%
       sqrt((global_X - first_x)^2 + (global_Y - first_y)^2 + (global_Z - first_z)^2),
       NA_real_
     ),
+    log_dist_from_first_resp = log(dist_from_first_resp),
     time_lag_since_first =
       response_frame_cam1 - response_frame_cam1[first_index]
     ) %>%
   ungroup()
 
+data$global_topo_dist_from_first <- NA
+data$log_global_topo_dist_from_first <- NA
+data$inst_topo_dist_from_first <- NA
+data$global_vor_dist_from_first <- NA
+data$inst_vor_dist_from_first <- NA
 
-#Incorporating time lag. Need to move everyone up a rank
-
-#True ordering
-data <- data %>%
-  group_by(drop_ID) %>%
-  mutate(first_responder = as.integer(!is.na(response_frame_cam1) & response_frame_cam1 == min(response_frame_cam1, na.rm = TRUE)), emerged = as.integer(!is.na(full_partial_none))) %>%
-  mutate(first_index = if (any(full_partial_none !=0 & !is.na(full_partial_none)))
-    which.min(ifelse(full_partial_none !=0 & !is.na(full_partial_none),
-                     response_frame_cam1, Inf))
-    else NA_integer_) %>%
-  mutate(
-    any_response = any(full_partial_none != 0 & !is.na(full_partial_none)), 
-    rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  # only rank full responders
-                      na.last = "keep", ties.method = "first"),
-    initator = as.integer(rank_order == 1),
-    second_responder = case_when(!any_response ~ NA_real_, rank_order == 1 ~ NA, rank_order == 2 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    third_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2) ~ NA, rank_order == 3 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    fourth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3) ~ NA, rank_order == 4 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    fifth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4)  ~ NA, rank_order == 5 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    sixth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4,5)  ~ NA, rank_order == 6 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    subsequent_responder = case_when(!any_response ~ NA_real_, emerged == 0 ~ NA_real_, rank_order == 1 ~ NA_real_, binary_response == 0 ~ 0, rank_order > 1 ~ 1),
-    first_x = global_X[first_index],
-    first_y = global_Y[first_index],
-    first_z = global_Z[first_index],
-    # Compute distance only for emerged
-    dist_from_first_resp = ifelse(
-      !is.na(subsequent_responder),
-      sqrt((global_X - first_x)^2 + (global_Y - first_y)^2 + (global_Z - first_z)^2),
-      NA_real_
-    ),
-    time_lag_since_first =
-      response_frame_cam1 - response_frame_cam1[first_index]
-  ) %>%
-  ungroup()
+#computing other social metrics
+for (g in unique(data$drop_ID)) {
+  if (first(data$any_response[data$drop_ID == g] == TRUE)) {
+    for (gg in unique(data$colony_eel_ID[data$drop_ID == g])) {
+      focal <- gg
+      focal_colony <- data$colony[data$colony_eel_ID == gg & data$drop_ID == g] 
+      focal_positions <- NA
+      if (focal %in% global_positions$colony_eel_ID) {
+        if (data$emerged[data$colony_eel_ID == gg & data$drop_ID == g] == 1) {
+          first <- first(data$colony_eel_ID[data$first_responder == 1 & data$drop_ID == g]) # fix decide what to do with two firsts
+          focal_positions <- global_positions[global_positions$colony == focal_colony,]
+          focal_positions$distance_to_focal <- sqrt((focal_positions$global_X - focal_positions$global_X[focal_positions$colony_eel_ID == focal])^2 + (focal_positions$global_Y - focal_positions$global_Y[focal_positions$colony_eel_ID == focal])^2 + (focal_positions$global_Z - focal_positions$global_Z[focal_positions$colony_eel_ID == focal])^2)
+          focal_positions$rank <- rank(focal_positions$distance_to_focal, na.last = "keep", ties.method = "first")
+      
+          data$global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_positions$rank[focal_positions$colony_eel_ID == first] - 1
+          data$log_global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_positions$rank[focal_positions$colony_eel_ID == first] - 1)
+          data$inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- NA
+          data$global_vor_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- NA
+          data$inst_vor_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- NA
+        }
+          }
+    }
+  }
+}
 
 
 #Incorporating time lag. Need to move everyone up a rank
@@ -248,17 +245,17 @@ data <- data %>%
     # everyone within 5 frames of initiator becomes rank 1
     rank_order = case_when(
       is.na(raw_rank) ~ NA_real_,
-      time_from_init <= 3 ~ 1,
+      time_from_init <= 5 ~ 1,
       TRUE ~ raw_rank
     )
   ) %>%
   
   # NEW: separate mutate so raw_rank exists first
   mutate(
-    n_first = sum(time_from_init <= 3 & !is.na(raw_rank), na.rm = TRUE),
+    n_first = sum(time_from_init <= 5 & !is.na(raw_rank), na.rm = TRUE),
     rank_order = case_when(
       is.na(raw_rank)     ~ NA_real_,
-      time_from_init <= 3 ~ 1,
+      time_from_init <= 5 ~ 1,
       TRUE                ~ raw_rank - (n_first - 1)
     )
   ) %>%
@@ -326,7 +323,7 @@ data <- data %>%
              (global_Z - first_z)^2),
       NA_real_
     ),
-    
+    log_dist_from_first_resp = log(dist_from_first_resp),
     time_lag_since_first = time_from_init
   ) %>%
   ungroup()
@@ -353,6 +350,18 @@ first_pair_time_lag %>%
   geom_point() +
   geom_smooth(method ="lm") +
   labs(y = "Time lag (ms)", x = "Distance from first responder")
+
+##Correlation test for distance to first resp and to ball
+d <- data %>% filter(!is.na(distance_to_ball) & !is.na(dist_from_first_resp))
+cor(d$dist_from_first_resp, d$distance_to_ball)
+#0.64 - correlated but not that much - and gllmmLASSO doesn't make one zero - keep both! both important, use both in each individuals decision
+
+d <- initator_responder %>% filter(!is.na(ball_sc) & !is.na(log_ball_sc))
+cor(d$ball_sc, d$log_ball_sc)
+
+
+d <- initator_responder %>% filter(!is.na(dist_sc) & !is.na(log_dist_sc))
+cor(d$dist_sc, d$log_dist_sc)
 
 
 #Fit a model for initator responder pairs
@@ -396,6 +405,8 @@ initator_responder$ball_sc <- as.numeric(initator_responder$ball_sc)
 
 initator_responder <- initator_responder[!is.na(initator_responder$second_responder), ]
 
+#Predictors to add - topological distance (is it the closest ind to you or 2nd, 3rd etc.), log topological distance, global topological distance, instantaneous topological, in global voronoi or not. in instaneous voronoi or not
+
 # testing random effects structure
 intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony/eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(intercepts_random_model)
@@ -430,7 +441,8 @@ for (j in 1:length(lambda)) {
     rnd = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
     family = binomial(),
     data = initator_responder,
-    lambda = lambda[j])
+    lambda = lambda[j]),
+    control = c(1,1)
   )
   
   if (!inherits(glm1, "try-error") & !is.null(glm1$coefficients)) {
