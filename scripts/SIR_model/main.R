@@ -13,6 +13,10 @@ library(glmmLasso)
 library(tibble)
 library(stringr)
 library(pracma)
+library(spatstat)
+library(deldir)
+
+source("~/Desktop/PhD/academic_projects/ball_drop_eel/scripts/SIR_model/R/sharededge.R")
 
 #Some drops the first response frame is before the ball enters view, filter these. - 176
 #Fish in frame - 146
@@ -181,38 +185,6 @@ data <- data %>%
     ) %>%
   ungroup()
 
-data$global_topo_dist_from_first <- NA
-data$log_global_topo_dist_from_first <- NA
-data$inst_topo_dist_from_first <- NA
-data$global_vor_dist_from_first <- NA
-data$inst_vor_dist_from_first <- NA
-
-#computing other social metrics
-for (g in unique(data$drop_ID)) {
-  if (first(data$any_response[data$drop_ID == g] == TRUE)) {
-    for (gg in unique(data$colony_eel_ID[data$drop_ID == g])) {
-      focal <- gg
-      focal_colony <- data$colony[data$colony_eel_ID == gg & data$drop_ID == g] 
-      focal_positions <- NA
-      if (focal %in% global_positions$colony_eel_ID) {
-        if (data$emerged[data$colony_eel_ID == gg & data$drop_ID == g] == 1) {
-          first <- first(data$colony_eel_ID[data$first_responder == 1 & data$drop_ID == g]) # fix decide what to do with two firsts
-          focal_positions <- global_positions[global_positions$colony == focal_colony,]
-          focal_positions$distance_to_focal <- sqrt((focal_positions$global_X - focal_positions$global_X[focal_positions$colony_eel_ID == focal])^2 + (focal_positions$global_Y - focal_positions$global_Y[focal_positions$colony_eel_ID == focal])^2 + (focal_positions$global_Z - focal_positions$global_Z[focal_positions$colony_eel_ID == focal])^2)
-          focal_positions$rank <- rank(focal_positions$distance_to_focal, na.last = "keep", ties.method = "first")
-      
-          data$global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_positions$rank[focal_positions$colony_eel_ID == first] - 1
-          data$log_global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_positions$rank[focal_positions$colony_eel_ID == first] - 1)
-          data$inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- NA
-          data$global_vor_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- NA
-          data$inst_vor_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- NA
-        }
-          }
-    }
-  }
-}
-
-
 #Incorporating time lag. Need to move everyone up a rank
 data <- data %>%
   group_by(drop_ID) %>%
@@ -327,6 +299,146 @@ data <- data %>%
     time_lag_since_first = time_from_init
   ) %>%
   ungroup()
+
+
+data$global_topo_dist_from_first <- NA
+data$log_global_topo_dist_from_first <- NA
+data$inst_topo_dist_from_first <- NA
+data$log_inst_topo_dist_from_first <- NA
+data$global_vor_neighbours <- NA
+data$inst_vor_neighbours <- NA
+data$global_vor_neighbours <- vector("list", nrow(data))
+data$inst_vor_neighbours <- vector("list", nrow(data))
+
+#computing other social metrics
+for (g in unique(data$drop_ID)) {
+  if (first(data$any_response[data$drop_ID == g]) == TRUE & sum(data$first_responder[data$drop_ID == g]) < 2) {
+    if (!is.na(data$global_X[data$first_responder == 1 & data$drop_ID == g])) {
+      for (gg in unique(data$colony_eel_ID[data$drop_ID == g])) {
+        focal <- gg
+        focal_colony <- data$colony[data$colony_eel_ID == gg & data$drop_ID == g] 
+        emerged <- data$colony_eel_ID[data$drop_ID == g & data$emerged == 1]
+        focal_positions <- NA
+        global_positions <- global_positions[!is.na(global_positions$global_X),]
+        if (focal %in% global_positions$colony_eel_ID) {
+          if (data$emerged[data$colony_eel_ID == gg & data$drop_ID == g] == 1) {
+            first_responder_id <- data$colony_eel_ID[data$first_responder == 1 & data$drop_ID == g] 
+            
+            #Global
+            focal_global_positions <- global_positions[global_positions$colony == focal_colony & !is.na(global_positions$global_X),]
+            focal_global_positions$distance_to_focal <- sqrt((focal_global_positions$global_X - focal_global_positions$global_X[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Y - focal_global_positions$global_Y[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Z - focal_global_positions$global_Z[focal_global_positions$colony_eel_ID == focal])^2)
+            focal_global_positions$rank <- rank(focal_global_positions$distance_to_focal, na.last = "keep", ties.method = "first")
+            center <- colMeans(focal_global_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
+            pts_centered <- sweep(as.matrix(focal_global_positions[,c("global_X","global_Y","global_Z")],), 2, center) #centre points
+            pca <- prcomp(pts_centered, center =FALSE) #fit plane via PCA, 3rd PC to normal to the best-fit plane
+            min_pc <- which.min(pca$sdev^2)  # flattest = normal to plane → new Z
+            max_pc <- which.max(pca$sdev^2)  # most spread → new X
+            mid_pc <- setdiff(1:3, c(min_pc, max_pc))  # middle → new Y
+            pts_rotated <- as.data.frame(pts_centered %*% pca$rotation[, c(max_pc, mid_pc, min_pc)])
+            colnames(pts_rotated) <- c("X_width", "Y_length", "Z_flat")
+            pts_rotated$id <- focal_global_positions$colony_eel_ID
+            points <- ppp(x = pts_rotated$X_width, y = pts_rotated$Y_length, window = owin(xrange=c(min(pts_rotated$X_width), max(pts_rotated$X_width)), yrange=c(min(pts_rotated$Y_length), max(pts_rotated$Y_length))))
+            sharededge <- function(X) {
+              verifyclass(X, "ppp")
+              Y <- X[as.rectangle(X)]
+              dX <- deldir(Y)
+              DS <- dX$dirsgs
+              xyxy <- DS[,1:4]
+              names(xyxy) <- c("x0","y0","x1","y1")
+              sX <- as.psp(xyxy,window=dX$rw)
+              marks(sX) <- 1:nobjects(sX)
+              sX <- sX[as.owin(X)]
+              tX <- tapply(lengths_psp(sX), marks(sX), sum)
+              jj <- as.integer(names(tX))
+              ans <- data.frame(ind1=DS[jj,5], 
+                                ind2=DS[jj,6], 
+                                leng=as.numeric(tX))
+              return(ans)
+            }
+            shared_edge_lengths <- sharededge(points)
+            
+            # Extract neighbour list
+            voronoi_neighbours_df <- do.call(rbind, lapply(seq_len(nrow(pts_rotated)), function(i) {
+              neighbour_rows <- shared_edge_lengths[shared_edge_lengths$ind1 == i | 
+                                                      shared_edge_lengths$ind2 == i, ]
+              neighbour_idx <- ifelse(neighbour_rows$ind1 == i, 
+                                      neighbour_rows$ind2, 
+                                      neighbour_rows$ind1)
+              data.frame(
+                focal     = pts_rotated$id[i],
+                neighbour = pts_rotated$id[neighbour_idx]
+              )
+            }))
+            
+            global_v_neighbours_list <- voronoi_neighbours_df %>%
+              group_by(focal) %>%
+              summarise(v_neighbours = list(neighbour))
+            
+            #Instantaneous
+            focal_inst_positions <- global_positions[global_positions$colony == focal_colony & !is.na(global_positions$global_X) & global_positions$colony_eel_ID %in% emerged,]
+            focal_inst_positions$distance_to_focal <- sqrt((focal_inst_positions$global_X - focal_inst_positions$global_X[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Y - focal_inst_positions$global_Y[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Z - focal_inst_positions$global_Z[focal_inst_positions$colony_eel_ID == focal])^2)
+            focal_inst_positions$rank <- rank(focal_inst_positions$distance_to_focal, na.last = "keep", ties.method = "first")
+            center <- colMeans(focal_inst_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
+            pts_centered <- sweep(as.matrix(focal_inst_positions[,c("global_X","global_Y","global_Z")]), 2, center) #centre points
+            pca <- prcomp(pts_centered, center =FALSE) #fit plane via PCA, 3rd PC to normal to the best-fit plane
+            min_pc <- which.min(pca$sdev^2)  # flattest = normal to plane → new Z
+            max_pc <- which.max(pca$sdev^2)  # most spread → new X
+            mid_pc <- setdiff(1:3, c(min_pc, max_pc))  # middle → new Y
+            pts_rotated <- as.data.frame(pts_centered %*% pca$rotation[, c(max_pc, mid_pc, min_pc)])
+            colnames(pts_rotated) <- c("X_width", "Y_length", "Z_flat")
+            pts_rotated$id <- focal_inst_positions$colony_eel_ID
+            points <- ppp(x = pts_rotated$X_width, y = pts_rotated$Y_length, window = owin(xrange=c(min(pts_rotated$X_width), max(pts_rotated$X_width)), yrange=c(min(pts_rotated$Y_length), max(pts_rotated$Y_length))))
+            sharededge <- function(X) {
+              verifyclass(X, "ppp")
+              Y <- X[as.rectangle(X)]
+              dX <- deldir(Y)
+              DS <- dX$dirsgs
+              xyxy <- DS[,1:4]
+              names(xyxy) <- c("x0","y0","x1","y1")
+              sX <- as.psp(xyxy,window=dX$rw)
+              marks(sX) <- 1:nobjects(sX)
+              sX <- sX[as.owin(X)]
+              tX <- tapply(lengths_psp(sX), marks(sX), sum)
+              jj <- as.integer(names(tX))
+              ans <- data.frame(ind1=DS[jj,5], 
+                                ind2=DS[jj,6], 
+                                leng=as.numeric(tX))
+              return(ans)
+            }
+            shared_edge_lengths <- sharededge(points)
+            
+            # Extract neighbour list
+            voronoi_neighbours_df <- do.call(rbind, lapply(seq_len(nrow(pts_rotated)), function(i) {
+              neighbour_rows <- shared_edge_lengths[shared_edge_lengths$ind1 == i | 
+                                                      shared_edge_lengths$ind2 == i, ]
+              neighbour_idx <- ifelse(neighbour_rows$ind1 == i, 
+                                      neighbour_rows$ind2, 
+                                      neighbour_rows$ind1)
+              data.frame(
+                focal     = pts_rotated$id[i],
+                neighbour = pts_rotated$id[neighbour_idx]
+              )
+            }))
+            
+            inst_v_neighbours_list <- voronoi_neighbours_df %>%
+              group_by(focal) %>%
+              summarise(v_neighbours = list(neighbour))
+            
+            data$global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1
+            data$log_global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1)
+            data$inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_inst_positions$rank[focal_inst_positions$colony_eel_ID == first_responder_id] - 1
+            data$log_inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_inst_positions$rank[focal_inst_positions$colony_eel_ID == first_responder_id] - 1)
+            data$global_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g] <- global_v_neighbours_list$v_neighbours[global_v_neighbours_list$focal == focal]
+            data$inst_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g] <- inst_v_neighbours_list$v_neighbours[inst_v_neighbours_list$focal == focal]
+            data$first_in_global_voronoi[data$colony_eel_ID == gg & data$drop_ID == g] <- ifelse(first_responder_id %in% data$global_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g][[1]], 1, 0)
+            data$first_in_inst_voronoi[data$colony_eel_ID == gg & data$drop_ID == g] <- ifelse(first_responder_id %in% data$inst_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g][[1]], 1, 0)
+          }
+        }
+      }
+    }
+  }
+}
+
 
 
 
