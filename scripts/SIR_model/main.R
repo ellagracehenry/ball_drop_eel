@@ -154,16 +154,13 @@ data <- data %>%
 #True ordering
 data <- data %>%
   group_by(drop_ID) %>%
-  mutate(first_responder = as.integer(!is.na(response_frame_cam1) & response_frame_cam1 == min(response_frame_cam1, na.rm = TRUE)), emerged = as.integer(!is.na(full_partial_none))) %>%
-  mutate(first_index = if (any(full_partial_none !=0 & !is.na(full_partial_none)))
-    which.min(ifelse(full_partial_none !=0 & !is.na(full_partial_none),
-                     response_frame_cam1, Inf))
-    else NA_integer_) %>%
   mutate(
+    emerged = as.integer(!is.na(full_partial_none)),
     any_response = any(full_partial_none != 0 & !is.na(full_partial_none)), 
-    rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  # only rank full responders
-                      na.last = "keep", ties.method = "first"),
-    initator = as.integer(rank_order == 1),
+    rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  
+                      na.last = "keep", ties.method = "min"),
+    first_responder = case_when(rank_order == 1 ~ 1, emerged == 1 & binary_response == 0 ~ 0, emerged == 1 & rank_order > 1 ~0, TRUE ~ NA_real_),
+    first_index = if (first(any_response)) which.min(ifelse(first_responder == 1, response_frame_cam1, Inf)) else NA_integer_,
     second_responder = case_when(!any_response ~ NA_real_, rank_order == 1 ~ NA, rank_order == 2 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
     third_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2) ~ NA, rank_order == 3 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
     fourth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3) ~ NA, rank_order == 4 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
@@ -174,12 +171,6 @@ data <- data %>%
     first_y = global_Y[first_index],
     first_z = global_Z[first_index],
     # Compute distance only for emerged
-    dist_from_first_resp = ifelse(
-      !is.na(subsequent_responder),
-      sqrt((global_X - first_x)^2 + (global_Y - first_y)^2 + (global_Z - first_z)^2),
-      NA_real_
-    ),
-    log_dist_from_first_resp = log(dist_from_first_resp),
     time_lag_since_first =
       response_frame_cam1 - response_frame_cam1[first_index]
     ) %>%
@@ -300,32 +291,33 @@ data <- data %>%
   ) %>%
   ungroup()
 
-
+data$dist_from_first <- NA
+data$log_dist_from_first <- NA
 data$global_topo_dist_from_first <- NA
 data$log_global_topo_dist_from_first <- NA
 data$inst_topo_dist_from_first <- NA
 data$log_inst_topo_dist_from_first <- NA
-data$global_vor_neighbours <- NA
-data$inst_vor_neighbours <- NA
 data$global_vor_neighbours <- vector("list", nrow(data))
 data$inst_vor_neighbours <- vector("list", nrow(data))
+data$global_vor_neighbours <- NA
+data$inst_vor_neighbours <- NA
 
 #computing other social metrics
 for (g in unique(data$drop_ID)) {
-  if (first(data$any_response[data$drop_ID == g]) == TRUE & sum(data$first_responder[data$drop_ID == g]) < 2) {
-    if (!is.na(data$global_X[data$first_responder == 1 & data$drop_ID == g])) {
+  if (first(data$any_response[data$drop_ID == g]) == TRUE & sum(data$first_responder[data$drop_ID == g], na.rm=TRUE) < 2) {
+    if (!is.na(data$global_X[data$drop_ID == g & data$first_responder %in% 1])) {
       for (gg in unique(data$colony_eel_ID[data$drop_ID == g])) {
         focal <- gg
         focal_colony <- data$colony[data$colony_eel_ID == gg & data$drop_ID == g] 
         emerged <- data$colony_eel_ID[data$drop_ID == g & data$emerged == 1]
         focal_positions <- NA
-        global_positions <- global_positions[!is.na(global_positions$global_X),]
+        global_positions_sub <- global_positions[!is.na(global_positions$global_X),]
         if (focal %in% global_positions$colony_eel_ID) {
           if (data$emerged[data$colony_eel_ID == gg & data$drop_ID == g] == 1) {
-            first_responder_id <- data$colony_eel_ID[data$first_responder == 1 & data$drop_ID == g] 
+            first_responder_id <- data$colony_eel_ID[data$first_responder %in% 1 & data$drop_ID == g] 
             
             #Global
-            focal_global_positions <- global_positions[global_positions$colony == focal_colony & !is.na(global_positions$global_X),]
+            focal_global_positions <- global_positions_sub[global_positions_sub$colony == focal_colony & !is.na(global_positions_sub$global_X),]
             focal_global_positions$distance_to_focal <- sqrt((focal_global_positions$global_X - focal_global_positions$global_X[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Y - focal_global_positions$global_Y[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Z - focal_global_positions$global_Z[focal_global_positions$colony_eel_ID == focal])^2)
             focal_global_positions$rank <- rank(focal_global_positions$distance_to_focal, na.last = "keep", ties.method = "first")
             center <- colMeans(focal_global_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
@@ -375,9 +367,9 @@ for (g in unique(data$drop_ID)) {
               summarise(v_neighbours = list(neighbour))
             
             #Instantaneous
-            focal_inst_positions <- global_positions[global_positions$colony == focal_colony & !is.na(global_positions$global_X) & global_positions$colony_eel_ID %in% emerged,]
+            focal_inst_positions <- global_positions[global_positions_sub$colony == focal_colony & !is.na(global_positions_sub$global_X) & global_positions_sub$colony_eel_ID %in% emerged,]
             focal_inst_positions$distance_to_focal <- sqrt((focal_inst_positions$global_X - focal_inst_positions$global_X[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Y - focal_inst_positions$global_Y[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Z - focal_inst_positions$global_Z[focal_inst_positions$colony_eel_ID == focal])^2)
-            focal_inst_positions$rank <- rank(focal_inst_positions$distance_to_focal, na.last = "keep", ties.method = "first")
+            focal_inst_positions$rank <- rank(focal_inst_positions$distance_to_focal, na.last = "keep", ties.method = "min")
             center <- colMeans(focal_inst_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
             pts_centered <- sweep(as.matrix(focal_inst_positions[,c("global_X","global_Y","global_Z")]), 2, center) #centre points
             pca <- prcomp(pts_centered, center =FALSE) #fit plane via PCA, 3rd PC to normal to the best-fit plane
@@ -424,6 +416,8 @@ for (g in unique(data$drop_ID)) {
               group_by(focal) %>%
               summarise(v_neighbours = list(neighbour))
             
+            data$dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id]
+            data$log_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id])
             data$global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1
             data$log_global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1)
             data$inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_inst_positions$rank[focal_inst_positions$colony_eel_ID == first_responder_id] - 1
@@ -464,14 +458,12 @@ first_pair_time_lag %>%
   labs(y = "Time lag (ms)", x = "Distance from first responder")
 
 ##Correlation test for distance to first resp and to ball
-d <- data %>% filter(!is.na(distance_to_ball) & !is.na(dist_from_first_resp))
-cor(d$dist_from_first_resp, d$distance_to_ball)
+d <- data %>% filter(!is.na(distance_to_ball) & !is.na(dist_from_first))
+cor(d$dist_from_first, d$distance_to_ball)
 #0.64 - correlated but not that much - and gllmmLASSO doesn't make one zero - keep both! both important, use both in each individuals decision
 
 d <- initator_responder %>% filter(!is.na(ball_sc) & !is.na(log_ball_sc))
 cor(d$ball_sc, d$log_ball_sc)
-
-
 d <- initator_responder %>% filter(!is.na(dist_sc) & !is.na(log_dist_sc))
 cor(d$dist_sc, d$log_dist_sc)
 
@@ -479,12 +471,16 @@ cor(d$dist_sc, d$log_dist_sc)
 #Fit a model for initator responder pairs
 initator_responder <- data
 
+#Ensure is not a first responder
 initator_responder <- initator_responder[
   complete.cases(initator_responder[,c(
-    #"second_responder",
-    "dist_from_first_resp",
+    "second_responder",
+    "dist_from_first",
     "trial_ID",
-    "distance_to_ball"
+    "distance_to_ball",
+    "global_topo_dist_from_first",
+    "log_global_topo_dist_from_first",
+    "first_in_global_voronoi"
   )]),
 ]
 
@@ -507,17 +503,23 @@ initator_responder$re_colony_eel_ID <- interaction(
 initator_responder <- as.data.frame(initator_responder)
 
 # Create all scaled versions first, OUTSIDE the loop
-initator_responder$dist_sc        <- scale(initator_responder$dist_from_first_resp)
+#nonsocial
 initator_responder$ball_sc        <- scale(initator_responder$distance_to_ball)
-initator_responder$log_dist_sc    <- scale(log(initator_responder$dist_from_first_resp))
 initator_responder$log_ball_sc    <- scale(log(initator_responder$distance_to_ball))
+#social
+initator_responder$metric_dist_sc        <- scale(initator_responder$dist_from_first) #metric
+initator_responder$log_metric_dist_sc    <- scale(initator_responder$log_dist_from_first) #log metric
+initator_responder$global_topo_dist_sc        <- scale(initator_responder$global_topo_dist_from_first) #global topo
+initator_responder$log_global_topo_dist_sc        <- scale(initator_responder$log_global_topo_dist_from_first) #log global topo
+initator_responder$inst_topo_dist_sc        <- scale(initator_responder$inst_topo_dist_from_first) #inst topo
+initator_responder$log_inst_topo_dist_sc        <- scale(initator_responder$log_inst_topo_dist_from_first) #log inst topo
+
+
 
 initator_responder$dist_sc <- as.numeric(initator_responder$dist_sc)
 initator_responder$ball_sc <- as.numeric(initator_responder$ball_sc)
 
-initator_responder <- initator_responder[!is.na(initator_responder$second_responder), ]
 
-#Predictors to add - topological distance (is it the closest ind to you or 2nd, 3rd etc.), log topological distance, global topological distance, instantaneous topological, in global voronoi or not. in instaneous voronoi or not
 
 # testing random effects structure
 intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony/eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
@@ -525,7 +527,7 @@ summary(intercepts_random_model)
 
 #test model
 test_model <- glmmLasso(
-  fix = second_responder ~ dist_sc + ball_sc + log_dist_sc + log_ball_sc,
+  fix = second_responder ~ ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,
   rnd = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
   family = binomial(),
   data = initator_responder,
@@ -549,12 +551,11 @@ binom_deviance <- function(y, y_hat) {
 for (j in 1:length(lambda)) {
   
   glm1 <- try(glmmLasso(
-    fix = second_responder ~ dist_sc + ball_sc + log_dist_sc + log_ball_sc,  # full model formula
+    fix = second_responder ~ ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,  # full model formula
     rnd = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
     family = binomial(),
     data = initator_responder,
-    lambda = lambda[j]),
-    control = c(1,1)
+    lambda = lambda[j])
   )
   
   if (!inherits(glm1, "try-error") & !is.null(glm1$coefficients)) {
@@ -584,7 +585,7 @@ abline(v = log10(final_lambda), lty = 2, col = "red")
 
 #Fit final model to the lambda with the lowest deviance to find the top-ranked predictors
 models_fine  <- glmmLasso(
-  fix = second_responder ~ dist_sc + ball_sc+ log_dist_sc + log_ball_sc,  # full model formula
+  fix = second_responder ~ ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,  # full model formula
   rnd = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
   family = binomial(),
   data = initator_responder,
@@ -635,7 +636,7 @@ fr_re_colony <- ranef(fr_model)$colony
 fr_re_colony$combo <- rownames(fr_re_colony)
 
 #2 - Second responder model
-sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first_resp + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data) #add pair identity as random var
+sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data) #add pair identity as random var
 summary(sr_model)
 
 #Fixed effects
@@ -653,7 +654,7 @@ sr_re_colony <- ranef(sr_model)$colony
 sr_re_colony$combo <- rownames(sr_re_colony)
 
 #3 - Subsequent responder model
-subs_model <- glmer(subsequent_responder ~ distance_to_ball + dist_from_first_resp + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
+subs_model <- glmer(subsequent_responder ~ distance_to_ball + dist_from_first + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(subs_model)
 #Fixed effects
 subs_intercept <- as.numeric(fixef(subs_model)[1])
