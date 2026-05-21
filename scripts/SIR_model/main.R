@@ -61,6 +61,11 @@ global_positions <- data %>%
     global_Y = mean(base_Y, na.rm = TRUE),
     global_Z = mean(base_Z, na.rm = TRUE),
     .groups = "drop"
+  ) %>%
+  filter(
+    !is.nan(global_X),
+    !is.nan(global_Y),
+    !is.nan(global_Z)
   )
 
 # join global positions onto every row
@@ -301,6 +306,8 @@ data$global_vor_neighbours <- vector("list", nrow(data))
 data$inst_vor_neighbours <- vector("list", nrow(data))
 data$global_vor_neighbours <- NA
 data$inst_vor_neighbours <- NA
+data$first_in_global_voronoi <- NA
+data$first_in_inst_voronoi <- NA
 
 #computing other social metrics
 for (g in unique(data$drop_ID)) {
@@ -315,7 +322,7 @@ for (g in unique(data$drop_ID)) {
         if (focal %in% global_positions$colony_eel_ID) {
           if (data$emerged[data$colony_eel_ID == gg & data$drop_ID == g] == 1) {
             first_responder_id <- data$colony_eel_ID[data$first_responder %in% 1 & data$drop_ID == g] 
-            
+          if (first_responder_id != focal) {
             #Global
             focal_global_positions <- global_positions_sub[global_positions_sub$colony == focal_colony & !is.na(global_positions_sub$global_X),]
             focal_global_positions$distance_to_focal <- sqrt((focal_global_positions$global_X - focal_global_positions$global_X[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Y - focal_global_positions$global_Y[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Z - focal_global_positions$global_Z[focal_global_positions$colony_eel_ID == focal])^2)
@@ -367,7 +374,8 @@ for (g in unique(data$drop_ID)) {
               summarise(v_neighbours = list(neighbour))
             
             #Instantaneous
-            focal_inst_positions <- global_positions[global_positions_sub$colony == focal_colony & !is.na(global_positions_sub$global_X) & global_positions_sub$colony_eel_ID %in% emerged,]
+            focal_inst_positions <- focal_global_positions[focal_global_positions$colony_eel_ID %in% emerged, ]
+            focal_inst_positions$distance_to_focal <- NA
             focal_inst_positions$distance_to_focal <- sqrt((focal_inst_positions$global_X - focal_inst_positions$global_X[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Y - focal_inst_positions$global_Y[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Z - focal_inst_positions$global_Z[focal_inst_positions$colony_eel_ID == focal])^2)
             focal_inst_positions$rank <- rank(focal_inst_positions$distance_to_focal, na.last = "keep", ties.method = "min")
             center <- colMeans(focal_inst_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
@@ -427,6 +435,7 @@ for (g in unique(data$drop_ID)) {
             data$first_in_global_voronoi[data$colony_eel_ID == gg & data$drop_ID == g] <- ifelse(first_responder_id %in% data$global_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g][[1]], 1, 0)
             data$first_in_inst_voronoi[data$colony_eel_ID == gg & data$drop_ID == g] <- ifelse(first_responder_id %in% data$inst_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g][[1]], 1, 0)
           }
+          }
         }
       }
     }
@@ -452,20 +461,20 @@ first_pair_time_lag %>%
   labs(x = "Time lag (ms)")
 
 first_pair_time_lag %>%
-  ggplot(aes(x=dist_from_first_resp, y = time_lag_since_first* (1000/60))) +
+  ggplot(aes(x=dist_from_first, y = time_lag_since_first* (1000/60))) +
   geom_point() +
   geom_smooth(method ="lm") +
   labs(y = "Time lag (ms)", x = "Distance from first responder")
 
 ##Correlation test for distance to first resp and to ball
-d <- data %>% filter(!is.na(distance_to_ball) & !is.na(dist_from_first))
+d <- initator_responder %>% filter(!is.na(distance_to_ball) & !is.na(ball_sc))
 cor(d$dist_from_first, d$distance_to_ball)
 #0.64 - correlated but not that much - and gllmmLASSO doesn't make one zero - keep both! both important, use both in each individuals decision
 
+d <- initator_responder %>% filter(!is.na(log_inst_topo_dist_sc) & !is.na(log_ball_sc))
+cor(d$log_inst_topo_dist_sc, d$log_ball_sc)
 d <- initator_responder %>% filter(!is.na(ball_sc) & !is.na(log_ball_sc))
 cor(d$ball_sc, d$log_ball_sc)
-d <- initator_responder %>% filter(!is.na(dist_sc) & !is.na(log_dist_sc))
-cor(d$dist_sc, d$log_dist_sc)
 
 
 #Fit a model for initator responder pairs
@@ -480,7 +489,8 @@ initator_responder <- initator_responder[
     "distance_to_ball",
     "global_topo_dist_from_first",
     "log_global_topo_dist_from_first",
-    "first_in_global_voronoi"
+    "first_in_global_voronoi",
+    "first_in_inst_voronoi"
   )]),
 ]
 
@@ -522,24 +532,27 @@ initator_responder$ball_sc <- as.numeric(initator_responder$ball_sc)
 
 
 # testing random effects structure
-intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony/eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
+intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony/eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder, lambda = 2)
 summary(intercepts_random_model)
 
-#test model
-test_model <- glmmLasso(
-  fix = second_responder ~ ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,
-  rnd = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
+#Intercept-only glmmLasso has a bug, needs one predictor
+#Simple model
+start_model <- glmmLasso(
+  fix    = second_responder ~ log_ball_sc + ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,
+  rnd    = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
   family = binomial(),
-  data = initator_responder,
-  lambda = 2
-  # no control/start - uses defaults
+  data   = initator_responder,
+  lambda = 100
 )
+summary(start_model)
 
-summary(test_model)
+#Extract starting values
+Delta.start <- start_model$Deltamatrix[start_model$conv.step, ]
+Q.start     <- start_model$Q_long[[start_model$conv.step + 1]]
 
 
 ####
-lambda      <- 10^seq(-4, 2, length = 50)
+lambda      <- 10^seq(2, -6, length = 50)
 devianz_vec <- rep(Inf, length(lambda))
 coeff_ma    <- NULL
 
@@ -551,11 +564,14 @@ binom_deviance <- function(y, y_hat) {
 for (j in 1:length(lambda)) {
   
   glm1 <- try(glmmLasso(
-    fix = second_responder ~ ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,  # full model formula
+    fix = second_responder ~ log_ball_sc + ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,  # full model formula
     rnd = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
     family = binomial(),
     data = initator_responder,
-    lambda = lambda[j])
+    lambda = lambda[j],
+    control = list(start   = Delta.start,
+                   q_start = Q.start)
+    )
   )
   
   if (!inherits(glm1, "try-error") & !is.null(glm1$coefficients)) {
@@ -565,6 +581,10 @@ for (j in 1:length(lambda)) {
     #cat("lambda:", round(lambda[j], 5),
     #    "| dev:", round(devianz_vec[j], 2),
     #    "| coefs:", round(glm1$coefficients[-1], 3), "\n")
+    
+    # Warm-start: carry this fit into the next lambda
+    Delta.start <- glm1$Deltamatrix[glm1$conv.step, ]
+    Q.start     <- glm1$Q_long[[glm1$conv.step + 1]]
   }
   
 }
@@ -583,15 +603,20 @@ points(log10(lambda)[!nonzero_mask], devianz_vec[!nonzero_mask],
        col = "grey70", pch = 19)
 abline(v = log10(final_lambda), lty = 2, col = "red")
 
+#FITTED LAMBDA
+lambda_min = 0.1676833 
 #Fit final model to the lambda with the lowest deviance to find the top-ranked predictors
 models_fine  <- glmmLasso(
-  fix = second_responder ~ ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,  # full model formula
+  fix = second_responder ~ log_ball_sc + ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,  # full model formula
   rnd = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
   family = binomial(),
   data = initator_responder,
   lambda = final_lambda
 )
 summary(models_fine)
+### PREDICTORS ###
+#log_ball_sc <- -0.4016866 (corr with ball_sc)
+#log_inst_topo_disc_sc <- -0.7924365
 
 
 # Check what's actually happening across lambda
@@ -605,7 +630,33 @@ cv1(second_responder, initator_responder, lambda1=1,fold=10)
 
 #Collinearity... drop one of the logs or non logs and see what happens
 
-#model coefficients are weights
+#Fitting logistic regression with chosen features, model coefficients are weights
+final_model <- glmer(
+  second_responder ~ log_inst_topo_dist_sc + log_ball_sc +  # your top predictors
+    (1 | colony/eel_ID) + (1 | drop_ID) + (1 | date),
+  family = binomial(),
+  data   = initator_responder
+)
+summary(final_model)
+##COEFFICIENTS##
+#unscale
+b0 <- as.numeric(fixef(final_model)[1])
+b1 <- as.numeric(fixef(final_model)[2])
+b2 <- as.numeric(fixef(final_model)[3])
+
+sd_log_inst <- sd(initator_responder$log_inst_topo_dist_from_first, na.rm=TRUE)
+sd_log_ball <- sd(log(initator_responder$distance_to_ball), na.rm=TRUE)
+
+mean_log_inst <- mean(initator_responder$log_inst_topo_dist_from_first, na.rm=TRUE)
+mean_log_ball <- mean(log(initator_responder$distance_to_ball), na.rm=TRUE)
+
+beta1_raw <- b1 / sd_log_inst
+beta2_raw <- b2 / sd_log_ball
+
+intercept_raw <- b0 -
+  beta1_raw * mean_log_inst -
+  beta2_raw * mean_log_ball
+
 
 #################################################################################
 #Simulate the ball landing at a random position
