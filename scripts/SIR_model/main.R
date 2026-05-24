@@ -136,6 +136,7 @@ data <- data %>%
   left_join(ball_global, by = "drop_ID")
 
 data$distance_to_ball <- sqrt((data$global_X - data$ball_global_X)^2 + (data$global_Y - data$ball_global_Y)^2 + (data$global_Z - data$ball_global_Z)^2)
+data$log_distance_to_ball <- log(sqrt((data$global_X - data$ball_global_X)^2 + (data$global_Y - data$ball_global_Y)^2 + (data$global_Z - data$ball_global_Z)^2))
 
 data <- data %>%
   mutate(binary_response = case_when(
@@ -145,6 +146,7 @@ data <- data %>%
     TRUE ~ NA_real_
   ))
 
+data$colony_size <- NA
 data$colony_size[data$colony == "S5"] <- 34
 data$colony_size[data$colony == "S9"] <- 59
 data$colony_size[data$colony == "S15"] <- 67
@@ -304,15 +306,14 @@ data$inst_topo_dist_from_first <- NA
 data$log_inst_topo_dist_from_first <- NA
 data$global_vor_neighbours <- vector("list", nrow(data))
 data$inst_vor_neighbours <- vector("list", nrow(data))
-data$global_vor_neighbours <- NA
-data$inst_vor_neighbours <- NA
 data$first_in_global_voronoi <- NA
 data$first_in_inst_voronoi <- NA
+data$inst_neighbours_topo_ranked <- vector("list", nrow(data))
+data$global_neighbours_topo_ranked <- vector("list", nrow(data))
 
 #computing other social metrics
 for (g in unique(data$drop_ID)) {
-  if (first(data$any_response[data$drop_ID == g]) == TRUE & sum(data$first_responder[data$drop_ID == g], na.rm=TRUE) < 2) {
-    if (!is.na(data$global_X[data$drop_ID == g & data$first_responder %in% 1])) {
+  if (sum(data$emerged[data$drop_ID == g], na.rm=TRUE) > 2) {
       for (gg in unique(data$colony_eel_ID[data$drop_ID == g])) {
         focal <- gg
         focal_colony <- data$colony[data$colony_eel_ID == gg & data$drop_ID == g] 
@@ -321,12 +322,13 @@ for (g in unique(data$drop_ID)) {
         global_positions_sub <- global_positions[!is.na(global_positions$global_X),]
         if (focal %in% global_positions$colony_eel_ID) {
           if (data$emerged[data$colony_eel_ID == gg & data$drop_ID == g] == 1) {
-            first_responder_id <- data$colony_eel_ID[data$first_responder %in% 1 & data$drop_ID == g] 
-          if (first_responder_id != focal) {
             #Global
             focal_global_positions <- global_positions_sub[global_positions_sub$colony == focal_colony & !is.na(global_positions_sub$global_X),]
             focal_global_positions$distance_to_focal <- sqrt((focal_global_positions$global_X - focal_global_positions$global_X[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Y - focal_global_positions$global_Y[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Z - focal_global_positions$global_Z[focal_global_positions$colony_eel_ID == focal])^2)
             focal_global_positions$rank <- rank(focal_global_positions$distance_to_focal, na.last = "keep", ties.method = "first")
+            focal_global_positions_ranked <- focal_global_positions[order(focal_global_positions$rank),]
+            focal_global_positions_ranked <- focal_global_positions_ranked [focal_global_positions_ranked$distance_to_focal != 0,]
+            colony_eel_ID_global_ranked_for_focal <- as.vector(focal_global_positions_ranked$colony_eel_ID)
             center <- colMeans(focal_global_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
             pts_centered <- sweep(as.matrix(focal_global_positions[,c("global_X","global_Y","global_Z")],), 2, center) #centre points
             pca <- prcomp(pts_centered, center =FALSE) #fit plane via PCA, 3rd PC to normal to the best-fit plane
@@ -378,6 +380,9 @@ for (g in unique(data$drop_ID)) {
             focal_inst_positions$distance_to_focal <- NA
             focal_inst_positions$distance_to_focal <- sqrt((focal_inst_positions$global_X - focal_inst_positions$global_X[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Y - focal_inst_positions$global_Y[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Z - focal_inst_positions$global_Z[focal_inst_positions$colony_eel_ID == focal])^2)
             focal_inst_positions$rank <- rank(focal_inst_positions$distance_to_focal, na.last = "keep", ties.method = "min")
+            focal_inst_positions_ranked <- focal_inst_positions[order(focal_inst_positions$rank),]
+            focal_inst_positions_ranked <- focal_inst_positions_ranked[focal_inst_positions_ranked$distance_to_focal != 0,]
+            colony_eel_ID_inst_ranked_for_focal <- as.vector(focal_inst_positions_ranked$colony_eel_ID)
             center <- colMeans(focal_inst_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
             pts_centered <- sweep(as.matrix(focal_inst_positions[,c("global_X","global_Y","global_Z")]), 2, center) #centre points
             pca <- prcomp(pts_centered, center =FALSE) #fit plane via PCA, 3rd PC to normal to the best-fit plane
@@ -424,23 +429,43 @@ for (g in unique(data$drop_ID)) {
               group_by(focal) %>%
               summarise(v_neighbours = list(neighbour))
             
-            data$dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id]
-            data$log_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id])
-            data$global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1
-            data$log_global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1)
-            data$inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_inst_positions$rank[focal_inst_positions$colony_eel_ID == first_responder_id] - 1
-            data$log_inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_inst_positions$rank[focal_inst_positions$colony_eel_ID == first_responder_id] - 1)
+            #Metrics for all drops
             data$global_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g] <- global_v_neighbours_list$v_neighbours[global_v_neighbours_list$focal == focal]
             data$inst_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g] <- inst_v_neighbours_list$v_neighbours[inst_v_neighbours_list$focal == focal]
-            data$first_in_global_voronoi[data$colony_eel_ID == gg & data$drop_ID == g] <- ifelse(first_responder_id %in% data$global_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g][[1]], 1, 0)
-            data$first_in_inst_voronoi[data$colony_eel_ID == gg & data$drop_ID == g] <- ifelse(first_responder_id %in% data$inst_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g][[1]], 1, 0)
-          }
+            data$inst_neighbours_topo_ranked[data$colony_eel_ID == gg & data$drop_ID == g] <- list(colony_eel_ID_inst_ranked_for_focal)
+            data$global_neighbours_topo_ranked[data$colony_eel_ID == gg & data$drop_ID == g] <- list(colony_eel_ID_global_ranked_for_focal)
+            
+            #Metrics for drops with responses
+            has_one_first_responder <- sum(data$first_responder[data$drop_ID == g], na.rm = TRUE) == 1
+            
+            first_has_global <- FALSE     
+            first_responder_id <- NA
+            
+            if (has_one_first_responder) {
+              first_responder_id <- data$colony_eel_ID[data$first_responder %in% 1 & data$drop_ID == g]
+              first_has_global <- !is.na(data$global_X[data$colony_eel_ID == first_responder_id & data$drop_ID == g])
+            }
+            
+            
+            if (has_one_first_responder & first_has_global & first_responder_id != gg) {
+              first_responder_id <- data$colony_eel_ID[data$first_responder %in% 1 & data$drop_ID == g] 
+              data$dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id]
+              data$log_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id])
+              data$global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1
+              data$log_global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1)
+              data$inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_inst_positions$rank[focal_inst_positions$colony_eel_ID == first_responder_id] - 1
+              data$log_inst_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_inst_positions$rank[focal_inst_positions$colony_eel_ID == first_responder_id] - 1)
+              data$first_in_global_voronoi[data$colony_eel_ID == gg & data$drop_ID == g] <- list(ifelse(first_responder_id %in% data$global_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g][[1]], 1, 0))
+              data$first_in_inst_voronoi[data$colony_eel_ID == gg & data$drop_ID == g] <- list(ifelse(first_responder_id %in% data$inst_vor_neighbours[data$colony_eel_ID == gg & data$drop_ID == g][[1]], 1, 0))
+            }
+            
+          
           }
         }
       }
     }
   }
-}
+
 
 
 
@@ -489,6 +514,7 @@ initator_responder <- initator_responder[
     "distance_to_ball",
     "global_topo_dist_from_first",
     "log_global_topo_dist_from_first",
+    "log_distance_to_ball",
     "first_in_global_voronoi",
     "first_in_inst_voronoi"
   )]),
@@ -515,7 +541,7 @@ initator_responder <- as.data.frame(initator_responder)
 # Create all scaled versions first, OUTSIDE the loop
 #nonsocial
 initator_responder$ball_sc        <- scale(initator_responder$distance_to_ball)
-initator_responder$log_ball_sc    <- scale(log(initator_responder$distance_to_ball))
+initator_responder$log_ball_sc    <- scale(initator_responder$log_distance_to_ball)
 #social
 initator_responder$metric_dist_sc        <- scale(initator_responder$dist_from_first) #metric
 initator_responder$log_metric_dist_sc    <- scale(initator_responder$log_dist_from_first) #log metric
@@ -525,14 +551,13 @@ initator_responder$inst_topo_dist_sc        <- scale(initator_responder$inst_top
 initator_responder$log_inst_topo_dist_sc        <- scale(initator_responder$log_inst_topo_dist_from_first) #log inst topo
 
 
-
-initator_responder$dist_sc <- as.numeric(initator_responder$dist_sc)
 initator_responder$ball_sc <- as.numeric(initator_responder$ball_sc)
 
 
-
+initator_responder$first_in_global_voronoi <- as.numeric(initator_responder$first_in_global_voronoi)
+initator_responder$first_in_inst_voronoi <- as.numeric(initator_responder$first_in_inst_voronoi)
 # testing random effects structure
-intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony/eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder, lambda = 2)
+intercepts_random_model <- glmer(second_responder ~ 1 + (1 | colony/eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
 summary(intercepts_random_model)
 
 #Intercept-only glmmLasso has a bug, needs one predictor
@@ -632,12 +657,17 @@ cv1(second_responder, initator_responder, lambda1=1,fold=10)
 
 #Fitting logistic regression with chosen features, model coefficients are weights
 final_model <- glmer(
-  second_responder ~ log_inst_topo_dist_sc + log_ball_sc +  # your top predictors
+  second_responder ~ log_ball_sc + log_inst_topo_dist_sc +  # your top predictors
     (1 | colony/eel_ID) + (1 | drop_ID) + (1 | date),
   family = binomial(),
   data   = initator_responder
 )
 summary(final_model)
+
+#checking for corr
+d <- initator_responder %>% filter(!is.na(log_inst_topo_dist_sc) & !is.na(log_ball_sc))
+cor(d$log_inst_topo_dist_sc, d$log_ball_sc) #Low, 0.3482386
+
 ##COEFFICIENTS##
 #unscale
 b0 <- as.numeric(fixef(final_model)[1])
@@ -645,18 +675,17 @@ b1 <- as.numeric(fixef(final_model)[2])
 b2 <- as.numeric(fixef(final_model)[3])
 
 sd_log_inst <- sd(initator_responder$log_inst_topo_dist_from_first, na.rm=TRUE)
-sd_log_ball <- sd(log(initator_responder$distance_to_ball), na.rm=TRUE)
+sd_log_ball <- sd(initator_responder$log_distance_to_ball, na.rm=TRUE)
 
 mean_log_inst <- mean(initator_responder$log_inst_topo_dist_from_first, na.rm=TRUE)
-mean_log_ball <- mean(log(initator_responder$distance_to_ball), na.rm=TRUE)
+mean_log_ball <- mean(initator_responder$log_distance_to_ball, na.rm=TRUE)
 
-beta1_raw <- b1 / sd_log_inst
-beta2_raw <- b2 / sd_log_ball
+b_log_inst_topo <- b1 / sd_log_inst
+b_log_ball <- b2 / sd_log_ball
 
-intercept_raw <- b0 -
-  beta1_raw * mean_log_inst -
-  beta2_raw * mean_log_ball
-
+second_responder_intercept <- b0 -
+  b1 * mean_log_inst -
+  b2 * mean_log_ball
 
 #################################################################################
 #Simulate the ball landing at a random position
@@ -670,8 +699,14 @@ intercept_raw <- b0 -
 #Weights - probability individual i startles given that individual j has startle. The logistic regression gives you w_ij, and you're justified in using it as p_ij in the contagion model because of the proportionality argument. 
 
 #1 - First responder model
-fr_model <- glmer(first_responder ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
-summary(fr_model)
+data_sans_subs <- data %>% filter(is.na(subsequent_responder) | subsequent_responder!= 1)
+fr_model_all <- glmer(first_responder ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
+summary(fr_model_all)
+data %>%
+  ggplot(aes(x = distance_to_ball, y = first_responder)) +
+  geom_point() +
+  geom_smooth()
+
 # Fixed effects
 fr_intercept <- as.numeric(fixef(fr_model)[1])  # gives β₀ and β_distance
 fr_b_dist <- as.numeric(fixef(fr_model)[2]) 
@@ -686,13 +721,25 @@ fr_re_date$combo <- rownames(fr_re_date)
 fr_re_colony <- ranef(fr_model)$colony
 fr_re_colony$combo <- rownames(fr_re_colony)
 
+fr_model_sans_subs <- glmer(first_responder ~ log_distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data_sans_subs)
+summary(fr_model_sans_subs)
+data_sans_subs %>%
+  ggplot(aes(x = distance_to_ball, y = first_responder)) +
+  geom_point() +
+  geom_smooth()
+# Fixed effects
+fr_intercept_sans_subs <- as.numeric(fixef(fr_model_sans_subs)[1])  # gives β₀ and β_distance
+fr_b_dist_sans_subs <- as.numeric(fixef(fr_model_sans_subs)[2]) 
+
 #2 - Second responder model
-sr_model <- glmer(second_responder ~ distance_to_ball + dist_from_first + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data) #add pair identity as random var
+sr_model <- glmer(second_responder ~ log_distance_to_ball + log_inst_topo_dist_from_first + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
 summary(sr_model)
 
 #Fixed effects
 sr_intercept <- as.numeric(fixef(sr_model)[1])
+sr_b_dist_ball <- as.numeric(fixef(sr_model)[2])
 sr_b_dist_first <- as.numeric(fixef(sr_model)[3])
+
 #Random effects
 sr_re_colony_colony_eel_ID <- ranef(sr_model)$'colony_eel_ID:colony'
 sr_re_colony_colony_eel_ID$combo <- rownames(sr_re_colony_colony_eel_ID)
@@ -704,8 +751,16 @@ sr_re_date$combo <- rownames(sr_re_date)
 sr_re_colony <- ranef(sr_model)$colony
 sr_re_colony$combo <- rownames(sr_re_colony)
 
+coefs <- list()
+coefs[1] <- fr_intercept_sans_subs 
+coefs[2] <- fr_b_dist_sans_subs
+coefs[3] <- sr_intercept
+coefs[4] <- sr_b_dist_first
+coefs[5] <- sr_b_dist_ball
+
+
 #3 - Subsequent responder model
-subs_model <- glmer(subsequent_responder ~ distance_to_ball + dist_from_first + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
+subs_model <- glmer(subsequent_responder ~ log_distance_to_ball*log_inst_topo_dist_from_first + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(subs_model)
 #Fixed effects
 subs_intercept <- as.numeric(fixef(subs_model)[1])
@@ -723,81 +778,60 @@ subs_re_colony$combo <- rownames(subs_re_colony)
 
 n_drops <- length(unique(data$drop_ID))
 
-#Model fit weight strengths (option 1)
+#All responder model
+all_model <- glmer(binary_response ~ log_distance_to_ball*log_inst_topo_dist_from_first + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
+summary(all_model)
+
+
+#First responder time lag
+data_first <- data %>% filter(first_responder ==1)
+data_first$lag <- data_first$response_frame_cam1 - data_first$ball_hit_frame_cam1 #small number means you responded early on
+hist(data_first$lag)
+data_first %>%
+  ggplot(aes(distance_to_ball, lag)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+#no correlation with distance to ball and response lag - closer individuals do not respond earlier. Simulation starts at the first responder, doesn't matter where they are from the ball. 
+
+######### Model fit weight strengths (option 1) ###########
 weight_strengths <- vector(mode="list", length = length(unique(data$colony)))
 colony_distances <- vector(mode="list", length = length(unique(data$colony)))
 
-for (c in 1:length(unique(data$colony))) {
+for (c in 1:length(unique(global_positions$colony))) {
   
   #filter out that colony data
-  data_colony <- data %>%
-    filter(colony == unique(data$colony)[c])
+  data_colony <- global_positions %>%
+    filter(colony == unique(global_positions$colony)[c])
   
   # get the full set of eel IDs for this colony
   all_eels <- unique(data_colony$colony_eel_ID)
-  
-  trial_distances <- vector(mode="list", length = length(unique(data_colony$trial_ID)))
-  
-  #for each trial
-  for (t in 1:length(unique(data_colony$trial_ID))) {
+
+  #name the rownames the eel_ID
+  coords <- data_colony[, c("global_X", "global_Y", "global_Z")]
+  rownames(coords) <- all_eels
     
-    #average eel position per trial
-    data_coords <- data_colony %>%
-      filter(trial_ID == unique(data_colony$trial_ID)[t]) %>%
-      group_by(colony_eel_ID) %>%
-      summarise(avg_x = mean(base_X, na.rm=TRUE), avg_y = mean(base_Y, na.rm=TRUE), avg_z = mean(base_Z, na.rm=TRUE))
+  #transform into distance matrix
+  dist_mat <- as.data.frame(as.matrix(dist(coords)))
     
-    #name the rownames the eel_ID
-    coords <- data_coords[, c("avg_x", "avg_y", "avg_z")]
-    rownames(coords) <- data_coords$colony_eel_ID
+  # pad with NA rows/cols for eels absent in this trial
+  missing_eels <- setdiff(all_eels, rownames(dist_mat))
     
-    #transform into distance matrix
-    dist_mat <- as.data.frame(as.matrix(dist(coords)))
-    
-    # pad with NA rows/cols for eels absent in this trial
-    missing_eels <- setdiff(all_eels, rownames(dist_mat))
-    
-    if (length(missing_eels) > 0) {
-      # add NA rows for missing eels
-      na_rows <- as.data.frame(matrix(NA, nrow = length(missing_eels), ncol = ncol(dist_mat),
+  if (length(missing_eels) > 0) {
+    # add NA rows for missing eels
+    na_rows <- as.data.frame(matrix(NA, nrow = length(missing_eels), ncol = ncol(dist_mat),
                                       dimnames = list(missing_eels, colnames(dist_mat))))
-      dist_mat <- rbind(dist_mat, na_rows)
+    dist_mat <- rbind(dist_mat, na_rows)
       
-      # add NA cols for missing eels
-      na_cols <- as.data.frame(matrix(NA, nrow = nrow(dist_mat), ncol = length(missing_eels),
+    # add NA cols for missing eels
+    na_cols <- as.data.frame(matrix(NA, nrow = nrow(dist_mat), ncol = length(missing_eels),
                                       dimnames = list(rownames(dist_mat), missing_eels)))
-      dist_mat <- cbind(dist_mat, na_cols)
-    }
-    
-    # reorder rows and cols to consistent order across trials
-    dist_mat <- dist_mat[all_eels, all_eels]
-    
-    trial_distances[[t]] <- dist_mat
+    dist_mat <- cbind(dist_mat, na_cols)
   }
-  
-  # sum up distances across trials
-  trial_distances_sum <- Reduce(
-    function(x, y) {
-      res <- x
-      res[!is.na(y)] <- ifelse(is.na(x[!is.na(y)]), y[!is.na(y)], x[!is.na(y)] + y[!is.na(y)])
-      res
-    },
-    trial_distances
-  )
-  
-  trial_distances_count <- Reduce(
-    function(x, y) x + (!is.na(y)),
-    trial_distances,
-    accumulate = FALSE,
-    init = matrix(0, nrow = nrow(trial_distances[[1]]), ncol = ncol(trial_distances[[1]]),
-                  dimnames = dimnames(trial_distances[[1]]))
-  )
-  
-  # pairs that were NA in *all* trials stay NA
-  trial_distances_mean <- trial_distances_sum / trial_distances_count
-  trial_distances_mean[trial_distances_count == 0] <- NA
-  
-  trial_distances_mean_lin_pred <- apply(trial_distances_mean, 
+    
+  # reorder rows and cols to consistent order across trials
+  dist_mat <- dist_mat[all_eels, all_eels]
+    
+  dist_mean_lin_pred <- apply(trial_distances_mean, 
                                 c(1,2), 
                                 function(x) {
                                   if (!is.na(x)) {
@@ -819,7 +853,9 @@ for (c in 1:length(unique(data$colony))) {
 
 colony_distances_all <- bind_rows(colony_distances)
 
-#Directed empirical weight strengths  for initator and responder
+#############################################
+
+######## Directed empirical weight strengths  for initator and responder (option 2, too limited data...) ########
 pairs_all <- vector(mode="list", length = length(unique(data$colony)))
 
 for (c in 1:length(unique(data$colony))) {
@@ -985,9 +1021,6 @@ final %>%
   geom_smooth()
 
 
-
-
-
 #Empirical weight strengths for every subseuqent pair
 pairs_all <- vector(mode="list", length = length(unique(data$colony)))
 
@@ -1061,6 +1094,11 @@ final %>%
   geom_jitter(alpha =0.8) #+
   #geom_smooth()
 
+########################################################
+
+
+
+
 
 
 ##Distributions
@@ -1084,11 +1122,11 @@ max(ranges$range)
 max_rate <- 1
 dt <- 1
 da <- 1
-threshold <- 0.01
+threshold <- 1
 tm <- 10
 tr <- 5
 
-n_sims <- 200
+n_sims <- 100
 social_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
 names(social_frame_recorder_list) <- unique(data$drop_ID)
 
@@ -1100,13 +1138,15 @@ for (i in unique(data$drop_ID)) {
   
   social_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
   
+  #Calculate which individuals are emerged 
+  drop_data <- data %>%
+    filter(drop_ID == i & emerged == 1 & !is.na(global_X)) # & !is.na(dist_from_first_resp)
+  
+  drop_eel_IDs <- unique(drop_data$colony_eel_ID)
+  
+  if (length(drop_eel_IDs) < 3) next
+  
   for (sim in 1:n_sims) {
-    
-    #Calculate which individuals are emerged 
-    drop_data <- data %>%
-      filter(drop_ID == i & !is.na(full_partial_none) & !is.na(base_x_cam1) & !is.na(base_x_cam2)) # & !is.na(dist_from_first_resp)
-    
-    drop_eel_IDs <- unique(drop_data$colony_eel_ID)
     
     #create a frame recorder matrix
     social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
@@ -1123,7 +1163,7 @@ for (i in unique(data$drop_ID)) {
       l_date <- first(drop_data$date)
       l_colony <- first(drop_data$colony)
       #for each eel i in drop j nested in colony k, compute the linear predictor
-      eta_j <- fr_intercept + fr_b_dist*(drop_data$distance_to_ball[h]) + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
+      eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[h]) #RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
       #convert this to a standard logistic transform - gives probability per eel
       p_respond <- 1/(1+exp(-eta_j))
       resp_data[h,1] <- l_colony_eel_ID
@@ -1159,8 +1199,11 @@ for (i in unique(data$drop_ID)) {
           if (state_matrix[j,1] == "i") {
             dosage_matrix[j,1] <- NA
           } else {
-            wij <- weight_strengths[[colony_idx]][focal_eel_ID, z]
-            if (rbinom(1,1,wij*max_rate*dt)== 1) {
+            focal_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == focal_eel_ID)]
+            rank <- which(focal_neighbours_ranked[[1]] == z)
+            eta_j <- as.numeric(coefs[4])*log(rank)
+            p_cue <- 1/(1+exp(-eta_j))
+            if (rbinom(1,1,p_cue*max_rate*dt)== 1) {
               dosage_matrix[j,1] <- dosage_matrix[j,1] + da
             } else {
               
@@ -1170,7 +1213,7 @@ for (i in unique(data$drop_ID)) {
       }
       
       #for each time step 
-      for (k in 2:20) {
+      for (k in 2:30) {
         K <- sum(state_matrix[,k-1] == "s")
         for (j in 1:length(drop_eel_IDs)) {
           focal_eel_ID <- drop_eel_IDs[j]
@@ -1188,9 +1231,15 @@ for (i in unique(data$drop_ID)) {
               #dose everyone
               for (jj in 1:length(drop_eel_IDs)) {
                 buddy_eel_ID <- drop_eel_IDs[jj]
-                wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
                 
-                if (rbinom(1,1,wij*max_rate*dt) == 1) {
+                if (buddy_eel_ID == focal_eel_ID) next  # skip self
+                
+                buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
+                rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
+                eta_j <- as.numeric(coefs[4])*log(rank)
+                p_cue <- 1/(1+exp(-eta_j))
+
+                if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
                   dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
                 } else {
                   
@@ -1205,9 +1254,15 @@ for (i in unique(data$drop_ID)) {
                 #dose everyone
                 for (jj in 1:length(drop_eel_IDs)) {
                   buddy_eel_ID <- drop_eel_IDs[jj]
-                  wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
                   
-                  if (rbinom(1,1,wij*max_rate*dt) == 1) {
+                  if (buddy_eel_ID == focal_eel_ID) next  # skip self
+                  
+                  buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
+                  rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
+                  eta_j <- as.numeric(coefs[4])*log(rank)
+                  p_cue <- 1/(1+exp(-eta_j))
+                  
+                  if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
                     dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
                   } else {
                     
@@ -1234,16 +1289,26 @@ for (i in unique(data$drop_ID)) {
             
             norm_cuml_dose <- cuml_dose/K
             
-            if (norm_cuml_dose > threshold) {
+            personal_threshold <- as.numeric(coefs[3]) + as.numeric(coefs[5])*drop_data$log_distance_to_ball[which(drop_data$colony_eel_ID == focal_eel_ID)]
+            p_threshold <- 1/(1+exp(-personal_threshold))
+            
+            if (norm_cuml_dose > threshold*p_threshold) {
               state_matrix[j,k] <- "i"
               social_frame_recorder_matrix[j] <- k
               
               #dose everyone else
               for (jj in 1:length(drop_eel_IDs)) {
                 buddy_eel_ID <- drop_eel_IDs[jj]
-                wij <- weight_strengths[[colony_idx]][focal_eel_ID, buddy_eel_ID]
                 
-                if (rbinom(1,1,wij*max_rate*dt) == 1) {
+                if (buddy_eel_ID == focal_eel_ID) next  # skip self
+                
+                buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
+                rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
+
+                eta_j <- as.numeric(coefs[4])*log(rank)
+                p_cue <- 1/(1+exp(-eta_j))
+                
+                if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
                   dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
                 } else {
                   
@@ -1252,7 +1317,6 @@ for (i in unique(data$drop_ID)) {
               
             } else {
               state_matrix[j,k] <- "s"
-              dosage_matrix[j,k] <- dosage_matrix[j,k]
             }
           }
         }
