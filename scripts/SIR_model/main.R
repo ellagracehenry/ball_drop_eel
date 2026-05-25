@@ -699,7 +699,6 @@ second_responder_intercept <- b0 -
 #Weights - probability individual i startles given that individual j has startle. The logistic regression gives you w_ij, and you're justified in using it as p_ij in the contagion model because of the proportionality argument. 
 
 #1 - First responder model
-data_sans_subs <- data %>% filter(is.na(subsequent_responder) | subsequent_responder!= 1)
 fr_model_all <- glmer(first_responder ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data)
 summary(fr_model_all)
 data %>%
@@ -721,6 +720,7 @@ fr_re_date$combo <- rownames(fr_re_date)
 fr_re_colony <- ranef(fr_model)$colony
 fr_re_colony$combo <- rownames(fr_re_colony)
 
+data_sans_subs <- data %>% filter(is.na(subsequent_responder) | subsequent_responder!= 1)
 fr_model_sans_subs <- glmer(first_responder ~ log_distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data_sans_subs)
 summary(fr_model_sans_subs)
 data_sans_subs %>%
@@ -1123,15 +1123,15 @@ max_rate <- 1
 dt <- 1
 da <- 1
 threshold <- 5
-tm <- 10
+tm <- 5
 tr <- 5
 fractional_contagion_first <- TRUE
 fractional_contagion_subs <- TRUE
 n_sims <- 10
 private_threshold <- 0.01
-social_threshold <- 1
-ball_decay_time_coef <- 0.1
-social_decay_time_coef <- 0.1 
+social_threshold <- 0.7
+ball_decay_time_coef <- 0.05
+social_decay_time_coef <- 0.05 
 
 param_grids <- expand.grid(threshold = c(1,5), tm = c(10), tr = c(5), fractional_contagion_first = TRUE, fractional_contagion_subs = TRUE)
 param_list <- split(param_grids, seq(nrow(param_grids)))
@@ -1206,8 +1206,16 @@ for (i in unique(data$drop_ID)) {
       
       #create state matrix 
       state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
-      state_matrix[fr_idx,1] <- "i"
-      state_matrix[-fr_idx,1] <- "s"
+      
+      for (fr_IDD in fr_idx) {
+        state_matrix[fr_IDD,1:5] <- "s"
+        frame <- sample(1:5,1)
+        start <- c(1:5)
+        start <- start[!start < frame]
+        state_matrix[fr_IDD,start] <- "i"
+      }
+
+      state_matrix[-fr_idx,1:5] <- "s"
       
       #create dosage matrix 
       dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
@@ -1215,9 +1223,9 @@ for (i in unique(data$drop_ID)) {
       dosage_matrix[-fr_idx,] <- 0
       
       #for each time step 
-      for (k in 2:30) {
+      for (k in 6:200) {
         if (fractional_contagion_subs == TRUE) {
-          K <- sum(state_matrix[,k-1] == "s")
+          K <- sum(state_matrix[,k-5] == "s")
         } else {
           K <- 1
         }
@@ -1228,8 +1236,7 @@ for (i in unique(data$drop_ID)) {
           if (state_matrix[j,k-1] == "r") { #if eel is recovered
             state_matrix[j,k] <- "r"
             dosage_matrix[j,k] <- NA
-          }
-          else if (state_matrix[j,k-1] == "i") { #if eel is infected
+          } else if (state_matrix[j,k-1] == "i") { #if eel is infected
             dosage_matrix[j,k] <- NA #state and frame recorder matrices stay the same
             frames_since_infected <- k - social_private_frame_recorder_matrix[j]
             if (k-tr <= 0) {
@@ -1278,17 +1285,25 @@ for (i in unique(data$drop_ID)) {
               }
             }
           } else { #eel is susceptible to hide
+            
+            if (k < 5) {
+              state_matrix[j,k] <- "s"
+            } else {
             #Check if responds to private cue of the ball, just delayed
-            eta_j <-  as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k) #Interecept (let's just fit it with the threshold) and RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
+            eta_j <-  as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k-5) #Interecept (let's just fit it with the threshold) and RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
             #convert this to a standard logistic transform - gives probability per eel
             p_private_cue <- 1/(1+exp(-eta_j))
             private_cue_received <- rbinom(n = 1, size = 1, prob = p_private_cue) 
             private_response <- ifelse(private_cue_received/K > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
             
+            cuml_dose <- 0
             
+            window_start <- max(1, (k-5) - tm)
+            window_end <- k-5
+            
+            cuml_dose <- sum(dosage_matrix[j, window_start:window_end], na.rm=TRUE)
             
             #Check if responds to social cues
-            cuml_dose <- sum(dosage_matrix[j, 1:(k-1)], na.rm=TRUE)
             norm_cuml_dose <- cuml_dose/K
             
             social_response <- ifelse(norm_cuml_dose > social_threshold, 1, 0)
@@ -1302,6 +1317,7 @@ for (i in unique(data$drop_ID)) {
             } else {
               state_matrix[j,k] <- "s"
             }
+            }
           }
         }
       }
@@ -1312,7 +1328,7 @@ for (i in unique(data$drop_ID)) {
 
 #Next step 
 # - make the non social model look like the social model - done
-# - make social only model thatthey only respond to social info after the first responder (first model is social + private
+# - make social only model thatthey only respond to social info after the first responder (first model is social + private) - done
 # - make the 5 frame delay processing. First responders can respond in any of the first 5 frames. Subsequent responders only start responding from frame 5 and look to their dosage 5 frames previous from the current frame. 
 
 ## Private-only model ##
@@ -1577,6 +1593,8 @@ for (i in unique(data$drop_ID)) {
     social_frame_recorder_list[[i]][[sim]] <- social_frame_recorder_matrix
   }
 }
+
+
 
 
 #Response vs no confusion matrix 
