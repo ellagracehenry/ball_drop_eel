@@ -15,6 +15,7 @@ library(stringr)
 library(pracma)
 library(spatstat)
 library(deldir)
+library(MuMIn) #https://ecologyforacrowdedplanet.wordpress.com/2013/08/27/r-squared-in-mixed-models-the-easy-way/
 
 source("~/Desktop/PhD/academic_projects/ball_drop_eel/scripts/SIR_model/R/sharededge.R")
 
@@ -514,9 +515,7 @@ initator_responder <- initator_responder[
     "distance_to_ball",
     "global_topo_dist_from_first",
     "log_global_topo_dist_from_first",
-    "log_distance_to_ball",
-    "first_in_global_voronoi",
-    "first_in_inst_voronoi"
+    "log_distance_to_ball"
   )]),
 ]
 
@@ -550,9 +549,7 @@ initator_responder$log_global_topo_dist_sc        <- scale(initator_responder$lo
 initator_responder$inst_topo_dist_sc        <- scale(initator_responder$inst_topo_dist_from_first) #inst topo
 initator_responder$log_inst_topo_dist_sc        <- scale(initator_responder$log_inst_topo_dist_from_first) #log inst topo
 
-
 initator_responder$ball_sc <- as.numeric(initator_responder$ball_sc)
-
 
 initator_responder$first_in_global_voronoi <- as.numeric(initator_responder$first_in_global_voronoi)
 initator_responder$first_in_inst_voronoi <- as.numeric(initator_responder$first_in_inst_voronoi)
@@ -630,6 +627,7 @@ abline(v = log10(final_lambda), lty = 2, col = "red")
 
 #FITTED LAMBDA
 lambda_min = 0.1676833 
+
 #Fit final model to the lambda with the lowest deviance to find the top-ranked predictors
 models_fine  <- glmmLasso(
   fix = second_responder ~ log_ball_sc + ball_sc + metric_dist_sc + log_metric_dist_sc + global_topo_dist_sc + log_global_topo_dist_sc + inst_topo_dist_sc + log_inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,  # full model formula
@@ -638,6 +636,8 @@ models_fine  <- glmmLasso(
   data = initator_responder,
   lambda = final_lambda
 )
+
+
 summary(models_fine)
 ### PREDICTORS ###
 #log_ball_sc <- -0.4016866 (corr with ball_sc)
@@ -706,6 +706,9 @@ data %>%
   geom_point() +
   geom_smooth()
 
+#R2
+r.squaredGLMM(fr_model_all) #worse r^2 than sans sbubs
+
 # Fixed effects
 fr_intercept <- as.numeric(fixef(fr_model)[1])  # gives β₀ and β_distance
 fr_b_dist <- as.numeric(fixef(fr_model)[2]) 
@@ -721,7 +724,7 @@ fr_re_colony <- ranef(fr_model)$colony
 fr_re_colony$combo <- rownames(fr_re_colony)
 
 data_sans_subs <- data %>% filter(is.na(subsequent_responder) | subsequent_responder!= 1)
-fr_model_sans_subs <- glmer(first_responder ~ log_distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data_sans_subs)
+fr_model_sans_subs <- glmer(first_responder ~ distance_to_ball + (1|colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = data_sans_subs)
 summary(fr_model_sans_subs)
 data_sans_subs %>%
   ggplot(aes(x = distance_to_ball, y = first_responder)) +
@@ -731,9 +734,14 @@ data_sans_subs %>%
 fr_intercept_sans_subs <- as.numeric(fixef(fr_model_sans_subs)[1])  # gives β₀ and β_distance
 fr_b_dist_sans_subs <- as.numeric(fixef(fr_model_sans_subs)[2]) 
 
+r.squaredGLMM(fr_model_sans_subs) # much higher with non log
+
 #2 - Second responder model
 sr_model <- glmer(second_responder ~ log_distance_to_ball + log_inst_topo_dist_from_first + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
 summary(sr_model)
+
+#R2
+r.squaredGLMM(sr_model) #lots to look at with log vs non log, grouped first responders or not
 
 #Fixed effects
 sr_intercept <- as.numeric(fixef(sr_model)[1])
@@ -1137,11 +1145,9 @@ param_grids <- expand.grid(threshold = c(1,5), tm = c(10), tr = c(5), fractional
 param_list <- split(param_grids, seq(nrow(param_grids)))
 #Eventually when model is a function: results <- pmap(param_grids, run_model)
 
-
 # Social and private information model
 social_private_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
 names(social_private_frame_recorder_list) <- unique(data$drop_ID)
-
 
 for (i in unique(data$drop_ID)) {
   
@@ -1190,7 +1196,6 @@ for (i in unique(data$drop_ID)) {
       resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_private_cue)
       resp_data[h,4] <- resp_data[h,3]/K_first
       resp_data[h,5] <- ifelse(resp_data[h,4] > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
-      
     }
     
     #if there is a first responder
@@ -1252,7 +1257,6 @@ for (i in unique(data$drop_ID)) {
                 rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
                 eta_j <- as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
                 p_cue <- 1/(1+exp(-eta_j))
-
                 if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
                   dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
                 } else {
