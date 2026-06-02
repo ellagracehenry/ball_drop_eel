@@ -40,12 +40,14 @@ data <- read_excel("final_master_ball_drop_3D.xlsx") %>%
   filter(trial_ID != 17)%>% #needs correcting annotations %>%
 filter(drop_ID != 149)  #two 156s?
 
+data %>%
+  group_by(colony) %>%
+  summarise(n_drop_ids = n_distinct(drop_ID))
+
 data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
 data$colony_eel_ID <- paste(data$eel_ID,data$colony,sep = "_")
 
-
 data$distance_to_ball <- sqrt((data$base_X - data$ball_hit_X)^2 + (data$base_Y - data$ball_hit_Y)^2 + (data$base_Z - data$ball_hit_Z)^2)
-
 
 #Computing global distances
 
@@ -58,7 +60,7 @@ global_positions <- data %>%
   filter(paste(colony, trial_ID) %in% paste(names(ref_trials), ref_trials)) %>%
   group_by(colony, colony_eel_ID) %>%
   summarise(
-    global_X = mean(base_X, na.rm = TRUE),
+    global_X = mean(base_X, na.rm = TRUE), #taking the average of the all positions for that trial
     global_Y = mean(base_Y, na.rm = TRUE),
     global_Z = mean(base_Z, na.rm = TRUE),
     .groups = "drop"
@@ -136,8 +138,10 @@ ball_global <- data %>%
 data <- data %>%
   left_join(ball_global, by = "drop_ID")
 
+
 data$distance_to_ball <- sqrt((data$global_X - data$ball_global_X)^2 + (data$global_Y - data$ball_global_Y)^2 + (data$global_Z - data$ball_global_Z)^2)
 data$log_distance_to_ball <- log(sqrt((data$global_X - data$ball_global_X)^2 + (data$global_Y - data$ball_global_Y)^2 + (data$global_Z - data$ball_global_Z)^2))
+
 
 data <- data %>%
   mutate(binary_response = case_when(
@@ -160,80 +164,69 @@ data <- data %>%
   ungroup()
 
 #True ordering
-data <- data %>%
-  group_by(drop_ID) %>%
-  mutate(
-    emerged = as.integer(!is.na(full_partial_none)),
-    any_response = any(full_partial_none != 0 & !is.na(full_partial_none)), 
-    rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  
-                      na.last = "keep", ties.method = "min"),
-    first_responder = case_when(rank_order == 1 ~ 1, emerged == 1 & binary_response == 0 ~ 0, emerged == 1 & rank_order > 1 ~0, TRUE ~ NA_real_),
-    first_index = if (first(any_response)) which.min(ifelse(first_responder == 1, response_frame_cam1, Inf)) else NA_integer_,
-    second_responder = case_when(!any_response ~ NA_real_, rank_order == 1 ~ NA, rank_order == 2 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    third_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2) ~ NA, rank_order == 3 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    fourth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3) ~ NA, rank_order == 4 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    fifth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4)  ~ NA, rank_order == 5 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    sixth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4,5)  ~ NA, rank_order == 6 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
-    subsequent_responder = case_when(!any_response ~ NA_real_, emerged == 0 ~ NA_real_, rank_order == 1 ~ NA_real_, binary_response == 0 ~ 0, rank_order > 1 ~ 1),
-    first_x = global_X[first_index],
-    first_y = global_Y[first_index],
-    first_z = global_Z[first_index],
-    # Compute distance only for emerged
-    time_lag_since_first =
-      response_frame_cam1 - response_frame_cam1[first_index]
-    ) %>%
-  ungroup()
+# data <- data %>%
+#   group_by(drop_ID) %>%
+#   mutate(
+#     emerged = as.integer(!is.na(full_partial_none)),
+#     any_response = any(full_partial_none != 0 & !is.na(full_partial_none)), 
+#     rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),  
+#                       na.last = "keep", ties.method = "min"),
+#     first_responder = case_when(rank_order == 1 ~ 1, emerged == 1 & binary_response == 0 ~ 0, emerged == 1 & rank_order > 1 ~0, TRUE ~ NA_real_),
+#     first_index = if (first(any_response)) which.min(ifelse(first_responder == 1, response_frame_cam1, Inf)) else NA_integer_,
+#     second_responder = case_when(!any_response ~ NA_real_, rank_order == 1 ~ NA, rank_order == 2 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+#     third_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2) ~ NA, rank_order == 3 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+#     fourth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3) ~ NA, rank_order == 4 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+#     fifth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4)  ~ NA, rank_order == 5 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+#     sixth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4,5)  ~ NA, rank_order == 6 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+#     subsequent_responder = case_when(!any_response ~ NA_real_, emerged == 0 ~ NA_real_, rank_order == 1 ~ NA_real_, binary_response == 0 ~ 0, rank_order > 1 ~ 1),
+#     first_x = global_X[first_index],
+#     first_y = global_Y[first_index],
+#     first_z = global_Z[first_index],
+#     # Compute distance only for emerged
+#     time_lag_since_first =
+#       response_frame_cam1 - response_frame_cam1[first_index]
+#     ) %>%
+#   ungroup()
 
 #Incorporating time lag. Need to move everyone up a rank
 data <- data %>%
   group_by(drop_ID) %>%
-  
   mutate(
     emerged = as.integer(!is.na(full_partial_none)),
     any_response = any(full_partial_none != 0 & !is.na(full_partial_none)),
     
-    # initiator (true first response)
-    first_index = if (any(full_partial_none != 0 & !is.na(full_partial_none)))
-      which.min(ifelse(full_partial_none != 0 & !is.na(full_partial_none),
-                       response_frame_cam1, Inf))
+    # Step 1: true chronological rank (matches true ordering exactly)
+    raw_rank = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),
+                    na.last = "keep", ties.method = "min"),
+    
+    # Step 2: find initiator frame (matches true ordering first_index logic)
+    first_index = if (first(any_response)) 
+      which.min(ifelse(raw_rank == 1, response_frame_cam1, Inf)) 
     else NA_integer_,
     
-    initiator_frame = response_frame_cam1[first_index],
+    first_ID = colony_eel_ID[first_index],
     
-    # time from initiator
+    initiator_frame = response_frame_cam1[first_index],
     time_from_init = response_frame_cam1 - initiator_frame
   ) %>%
   
+  # Step 3: collapse within-threshold individuals to rank 1 (only change from true ordering)
   mutate(
-    # ORIGINAL chronological order (unchanged)
-    raw_rank = rank(
-      ifelse(full_partial_none != 0, response_frame_cam1, NA),
-      na.last = "keep",
-      ties.method = "first"
+    n_first = sum(time_from_init <= 4 & !is.na(raw_rank), na.rm = TRUE),
+    rank_order = case_when(
+      is.na(raw_rank)      ~ NA_real_,
+      time_from_init <= 4 ~ 1,
+      TRUE                 ~ raw_rank - (n_first - 1)
+    )
+  ) %>%
+  
+  mutate(
+    first_responder = case_when(
+      rank_order == 1 ~ 1,
+      emerged == 1 & binary_response == 0 ~ 0,
+      emerged == 1 & rank_order > 1 ~ 0,
+      TRUE ~ NA_real_
     ),
-    
-    # NEW RULE:
-    # everyone within 5 frames of initiator becomes rank 1
-    rank_order = case_when(
-      is.na(raw_rank) ~ NA_real_,
-      time_from_init <= 5 ~ 1,
-      TRUE ~ raw_rank
-    )
-  ) %>%
-  
-  # NEW: separate mutate so raw_rank exists first
-  mutate(
-    n_first = sum(time_from_init <= 5 & !is.na(raw_rank), na.rm = TRUE),
-    rank_order = case_when(
-      is.na(raw_rank)     ~ NA_real_,
-      time_from_init <= 5 ~ 1,
-      TRUE                ~ raw_rank - (n_first - 1)
-    )
-  ) %>%
-  
-  mutate(
-    initiator = as.integer(!is.na(raw_rank) & raw_rank == 1),
-    first_responder = as.integer(!is.na(rank_order) & rank_order == 1),
     
     second_responder = case_when(
       !any_response ~ NA_real_,
@@ -242,7 +235,6 @@ data <- data %>%
       emerged == 1 ~ 0,
       TRUE ~ NA_real_
     ),
-    
     third_responder = case_when(
       !any_response ~ NA_real_,
       rank_order %in% c(1,2) ~ NA,
@@ -250,7 +242,6 @@ data <- data %>%
       emerged == 1 ~ 0,
       TRUE ~ NA_real_
     ),
-    
     fourth_responder = case_when(
       !any_response ~ NA_real_,
       rank_order %in% c(1,2,3) ~ NA,
@@ -258,7 +249,6 @@ data <- data %>%
       emerged == 1 ~ 0,
       TRUE ~ NA_real_
     ),
-    
     fifth_responder = case_when(
       !any_response ~ NA_real_,
       rank_order %in% c(1,2,3,4) ~ NA,
@@ -266,7 +256,6 @@ data <- data %>%
       emerged == 1 ~ 0,
       TRUE ~ NA_real_
     ),
-    
     sixth_responder = case_when(
       !any_response ~ NA_real_,
       rank_order %in% c(1,2,3,4,5) ~ NA,
@@ -274,7 +263,6 @@ data <- data %>%
       emerged == 1 ~ 0,
       TRUE ~ NA_real_
     ),
-    
     subsequent_responder = case_when(
       !any_response ~ NA_real_,
       emerged == 0 ~ NA_real_,
@@ -286,15 +274,6 @@ data <- data %>%
     first_x = global_X[first_index],
     first_y = global_Y[first_index],
     first_z = global_Z[first_index],
-    
-    dist_from_first_resp = ifelse(
-      !is.na(subsequent_responder),
-      sqrt((global_X - first_x)^2 +
-             (global_Y - first_y)^2 +
-             (global_Z - first_z)^2),
-      NA_real_
-    ),
-    log_dist_from_first_resp = log(dist_from_first_resp),
     time_lag_since_first = time_from_init
   ) %>%
   ungroup()
@@ -437,19 +416,25 @@ for (g in unique(data$drop_ID)) {
             data$global_neighbours_topo_ranked[data$colony_eel_ID == gg & data$drop_ID == g] <- list(colony_eel_ID_global_ranked_for_focal)
             
             #Metrics for drops with responses
-            has_one_first_responder <- sum(data$first_responder[data$drop_ID == g], na.rm = TRUE) == 1
+            first_responder_id <- data %>%
+              filter(drop_ID == g, first_responder == 1) %>%
+              slice_min(response_frame_cam1, n = 1, with_ties = FALSE) %>%
+              pull(colony_eel_ID)
             
-            first_has_global <- FALSE     
-            first_responder_id <- NA
+            # check for exact ties among rank_order == 1
+            n_exact_ties <- data %>%
+              filter(drop_ID == g, first_responder == 1) %>%
+              summarise(n = sum(response_frame_cam1 == min(response_frame_cam1, na.rm = TRUE), na.rm = TRUE)) %>%
+              pull(n)
             
-            if (has_one_first_responder) {
-              first_responder_id <- data$colony_eel_ID[data$first_responder %in% 1 & data$drop_ID == g]
-              first_has_global <- !is.na(data$global_X[data$colony_eel_ID == first_responder_id & data$drop_ID == g])
-            }
+            first_has_global <- n_exact_ties == 1 &&
+              length(first_responder_id) == 1 &&
+              !is.na(data$global_X[data$colony_eel_ID == first_responder_id & data$drop_ID == g])
             
+            n_first_responders <- sum(data$drop_ID == g & data$first_responder == 1, na.rm = TRUE)
             
-            if (has_one_first_responder & first_has_global & first_responder_id != gg) {
-              first_responder_id <- data$colony_eel_ID[data$first_responder %in% 1 & data$drop_ID == g] 
+            if (n_first_responders == 1 && first_has_global && first_responder_id != gg) {
+              # all the distance calculations — unchanged
               data$dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id]
               data$log_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id])
               data$global_topo_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$rank[focal_global_positions$colony_eel_ID == first_responder_id] - 1
@@ -477,9 +462,6 @@ first_pair_time_lag <- data %>%
   group_by(drop_ID) %>%
   filter(sum(time_lag_since_first == 0, na.rm=TRUE) == 0) %>%
   ungroup()
-
-#%>%
-  #filter(time_lag_since_first > 0)
 
 first_pair_time_lag %>%
   ggplot(aes(x = time_lag_since_first * (1000/60))) +
@@ -639,6 +621,91 @@ models_fine  <- glmmLasso(
 
 
 summary(models_fine)
+
+#Cross validated lamda
+cv_glmmLasso <- function(data, lambda_vec, k_folds = 10, seed = 42) {
+  
+  set.seed(seed)
+  
+  # Create folds (by drop_ID to avoid data leakage within a drop)
+  drop_ids  <- unique(data$drop_ID)
+  fold_assignment <- sample(rep(1:k_folds, length.out = length(drop_ids)))
+  fold_map  <- data.frame(drop_ID = drop_ids, fold = fold_assignment)
+  data      <- left_join(data, fold_map, by = "drop_ID")
+  
+  cv_deviance <- rep(0, length(lambda_vec))
+  
+  for (j in seq_along(lambda_vec)) {
+    fold_deviances <- rep(NA, k_folds)
+    
+    for (f in 1:k_folds) {
+      train <- data[data$fold != f, ]
+      test  <- data[data$fold == f, ]
+      
+      # Refit start model on training fold
+      start_mod <- try(glmmLasso(
+        fix = second_responder ~ log_ball_sc + ball_sc + 
+          log_metric_dist_sc + metric_dist_sc + log_global_topo_dist_sc + global_topo_dist_sc +
+          log_inst_topo_dist_sc + inst_topo_dist_sc +
+          first_in_global_voronoi + first_in_inst_voronoi,
+        rnd    = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
+        family = binomial(),
+        data   = train,
+        lambda = lambda_vec[j]
+      ), silent = TRUE)
+      
+      if (inherits(start_mod, "try-error")) next
+      
+      # Predict on test fold (fixed effects only, RE = 0 for unseen groups)
+      X_test <- model.matrix(
+        ~ log_ball_sc + ball_sc + 
+          log_metric_dist_sc + metric_dist_sc + log_global_topo_dist_sc + global_topo_dist_sc +
+          log_inst_topo_dist_sc + inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,
+        data = test
+      )
+      
+      eta      <- X_test %*% start_mod$coefficients
+      y_hat    <- plogis(eta)
+      y_hat    <- pmin(pmax(y_hat, 1e-6), 1 - 1e-6)
+      y        <- test$second_responder
+      
+      fold_deviances[f] <- -2 * sum(y * log(y_hat) + (1 - y) * log(1 - y_hat), 
+                                    na.rm = TRUE)
+    }
+    
+    cv_deviance[j] <- mean(fold_deviances, na.rm = TRUE)
+    cat("lambda:", round(lambda_vec[j], 6), 
+        "| CV deviance:", round(cv_deviance[j], 3), "\n")
+  }
+  
+  best_lambda <- lambda_vec[which.min(cv_deviance)]
+  
+  plot(log10(lambda_vec), cv_deviance, type = "b", pch = 19,
+       xlab = "log10(lambda)", ylab = "Mean CV deviance",
+       main = "Cross-validated lambda selection")
+  abline(v = log10(best_lambda), lty = 2, col = "red")
+  
+  list(cv_deviance = cv_deviance, best_lambda = best_lambda)
+}
+
+# Run it - use a coarser grid first as it's slow
+lambda_cv <- 10^seq(2, -3, length = 10)
+cv_result  <- cv_glmmLasso(initator_responder, lambda_cv)
+cat("Best lambda:", cv_result$best_lambda, "\n")
+
+# Refit final model at CV-selected lambda
+final_model_cv <- glmmLasso(
+  fix = second_responder ~ log_ball_sc + ball_sc + 
+    log_metric_dist_sc + metric_dist_sc + log_global_topo_dist_sc + global_topo_dist_sc +
+    log_inst_topo_dist_sc + inst_topo_dist_sc + first_in_global_voronoi + first_in_inst_voronoi,
+  rnd    = list(re_colony_eel_ID = ~1, colony = ~1, drop_ID = ~1, date = ~1),
+  family = binomial(),
+  data   = initator_responder,
+  lambda = cv_result$best_lambda
+)
+summary(final_model_cv)
+
+
 ### PREDICTORS ###
 #log_ball_sc <- -0.4016866 (corr with ball_sc)
 #log_inst_topo_disc_sc <- -0.7924365
@@ -666,7 +733,7 @@ summary(final_model)
 
 #checking for corr
 d <- initator_responder %>% filter(!is.na(log_inst_topo_dist_sc) & !is.na(log_ball_sc))
-cor(d$log_inst_topo_dist_sc, d$log_ball_sc) #Low, 0.3482386
+cor(d$distance_to_ball, d$log_ball_sc) #Low, 0.3482386
 
 ##COEFFICIENTS##
 #unscale
@@ -735,6 +802,8 @@ fr_intercept_sans_subs <- as.numeric(fixef(fr_model_sans_subs)[1])  # gives β�
 fr_b_dist_sans_subs <- as.numeric(fixef(fr_model_sans_subs)[2]) 
 
 r.squaredGLMM(fr_model_sans_subs) # much higher with non log
+
+#First responder bayesian
 
 #2 - Second responder model
 sr_model <- glmer(second_responder ~ log_distance_to_ball + log_inst_topo_dist_from_first + (1 | colony/colony_eel_ID) + (1|drop_ID) + (1|date), family = binomial, data = initator_responder)
