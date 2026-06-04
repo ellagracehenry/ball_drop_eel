@@ -278,6 +278,11 @@ data <- data %>%
   ) %>%
   ungroup()
 
+data <- data %>%
+  group_by(drop_ID) %>%
+  mutate(n_responders = sum(binary_response, na.rm=TRUE)) %>%
+  ungroup()
+
 data$dist_from_first <- NA
 data$log_dist_from_first <- NA
 data$global_topo_dist_from_first <- NA
@@ -733,7 +738,7 @@ summary(final_model)
 
 #checking for corr
 d <- initator_responder %>% filter(!is.na(log_inst_topo_dist_sc) & !is.na(log_ball_sc))
-cor(d$distance_to_ball, d$log_ball_sc) #Low, 0.3482386
+cor(d$log_inst_topo_dist_sc, d$log_ball_sc) #Low, 0.3482386
 
 ##COEFFICIENTS##
 #unscale
@@ -1210,6 +1215,13 @@ social_threshold <- 0.7
 ball_decay_time_coef <- 0.05
 social_decay_time_coef <- 0.05 
 
+data$log_distance_to_ball_sc <- scale(data$log_distance_to_ball)
+data$log_inst_topo_dist_from_first_sc <- scale(data$log_inst_topo_dist_from_first)
+orig_topo_mean <- attr(initator_responder$log_inst_topo_dist_sc, "scaled:center")
+orig_topo_sd   <- attr(initator_responder$log_inst_topo_dist_sc, "scaled:scale")
+orig_ball_mean <- attr(data_no_first$log_distance_to_ball_sc, "scaled:center")
+orig_ball_sd   <- attr(data_no_first$log_distance_to_ball_sc, "scaled:scale")
+
 param_grids <- expand.grid(threshold = c(1,5), tm = c(10), tr = c(5), fractional_contagion_first = TRUE, fractional_contagion_subs = TRUE)
 param_list <- split(param_grids, seq(nrow(param_grids)))
 #Eventually when model is a function: results <- pmap(param_grids, run_model)
@@ -1257,7 +1269,7 @@ for (i in unique(data$drop_ID)) {
       l_date <- first(drop_data$date)
       l_colony <- first(drop_data$colony)
       #for each eel i in drop j nested in colony k, compute the linear predictor
-      eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[h]) - ball_decay_time_coef*log(k) #RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
+      eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball_sc[h]) - ball_decay_time_coef*log(k) #RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
       #convert this to a standard logistic transform - gives probability per eel
       p_private_cue <- 1/(1+exp(-eta_j))
       resp_data[h,1] <- l_colony_eel_ID
@@ -1322,9 +1334,14 @@ for (i in unique(data$drop_ID)) {
                 
                 if (buddy_eel_ID == focal_eel_ID) next  # skip self
                 
+
+                
                 buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
                 rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
-                eta_j <- as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
+                
+                log_inst_topo_dist_sc <- (log(rank) - orig_topo_mean) / orig_topo_sd
+                
+                eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc - social_decay_time_coef*log(frames_since_infected)
                 p_cue <- 1/(1+exp(-eta_j))
                 if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
                   dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
@@ -1346,7 +1363,8 @@ for (i in unique(data$drop_ID)) {
                   
                   buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
                   rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
-                  eta_j <- as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
+                  log_inst_topo_dist_sc <- (log(rank) - orig_topo_mean) / orig_topo_sd
+                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc - social_decay_time_coef*log(frames_since_infected)
                   p_cue <- 1/(1+exp(-eta_j))
                   
                   if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
@@ -1363,7 +1381,7 @@ for (i in unique(data$drop_ID)) {
               state_matrix[j,k] <- "s"
             } else {
             #Check if responds to private cue of the ball, just delayed
-            eta_j <-  as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k-5) #Interecept (let's just fit it with the threshold) and RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
+            eta_j <-  as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k) #Interecept (let's just fit it with the threshold) and RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
             #convert this to a standard logistic transform - gives probability per eel
             p_private_cue <- 1/(1+exp(-eta_j))
             private_cue_received <- rbinom(n = 1, size = 1, prob = p_private_cue) 
@@ -1608,7 +1626,7 @@ for (i in unique(data$drop_ID)) {
                 
                 buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
                 rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
-                eta_j <- as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
+                eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
                 p_cue <- 1/(1+exp(-eta_j))
                 
                 if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
@@ -1631,7 +1649,7 @@ for (i in unique(data$drop_ID)) {
                   
                   buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
                   rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
-                  eta_j <- as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
+                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
                   p_cue <- 1/(1+exp(-eta_j))
                   
                   if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
