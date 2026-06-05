@@ -1149,7 +1149,7 @@ sr_bayes_liTxB <- brm(
     (1 | date),
   
   data = initator_responder,
-  family = bernoulli,
+  family = brms::bernoulli,
   save_pars = save_pars(all = TRUE),
   
   chains = 4,

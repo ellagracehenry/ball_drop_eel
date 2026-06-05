@@ -104,7 +104,7 @@ ball_global <- data %>%
     # eels with both drop-space AND global positions, sorted by distance to ball
     landmarks <- drop_data %>%
       filter(!is.na(base_X), !is.na(global_X), !is.na(distance_to_ball)) %>%
-      filter(base_reproj_error < 5) %>%  # only well-triangulated eels as landmarks
+      filter(base_reproj_error < 5) %>%  # only well-triangulated eels as landmarks. DOES EVERYTHING GO TO SHIT IF THIS IS REMOVED?? CURRENTLY IT CULLS TRIAL 12 AND 14
       slice_min(distance_to_ball, n = 3, with_ties = FALSE)
     
     if (nrow(landmarks) < 3) {
@@ -1213,7 +1213,7 @@ n_sims <- 10
 private_threshold <- 0.01
 social_threshold <- 0.7
 ball_decay_time_coef <- 0.2
-social_decay_time_coef <- 0.05 
+social_decay_time_coef <- 0.1 
 
 data$log_distance_to_ball_sc <- scale(data$log_distance_to_ball)
 data$log_inst_topo_dist_from_first_sc <- scale(data$log_inst_topo_dist_from_first)
@@ -1224,6 +1224,7 @@ orig_ball_sd   <- attr(data_no_first$log_distance_to_ball_sc, "scaled:scale")
 
 param_grids <- expand.grid(threshold = c(1,5), tm = c(10), tr = c(5), fractional_contagion_first = TRUE, fractional_contagion_subs = TRUE)
 param_list <- split(param_grids, seq(nrow(param_grids)))
+eligble_drops <- 1
 #Eventually when model is a function: results <- pmap(param_grids, run_model)
 
 # Social and private information model
@@ -1248,7 +1249,11 @@ for (i in unique(data$drop_ID)) {
     K_first <- 1
   }
   
+  #if (is.na(sum(drop_data$distance_to_ball, na.rm=TRUE))) next
+      
   if (length(drop_eel_IDs) < 3) next
+  
+  eligble_drops <- eligble_drops +1
   
   for (sim in 1:n_sims) {
     
@@ -1279,6 +1284,13 @@ for (i in unique(data$drop_ID)) {
       resp_data[h,5] <- ifelse(resp_data[h,4] > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
     }
     
+    #create state matrix 
+    state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
+    state_matrix[,1] <- "s"
+    #create dosage matrix 
+    dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
+    dosage_matrix[,] <- 0
+    
     #if there is a first responder
     if (sum(resp_data[,5], na.rm = TRUE) > 0) {
       
@@ -1290,19 +1302,16 @@ for (i in unique(data$drop_ID)) {
       
       social_private_frame_recorder_matrix[fr_idx] <- 1
       
-      #create state matrix 
-      state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
-      
       for (fr_IDD in fr_idx) {
         state_matrix[fr_IDD,1] <- "i"
       }
 
       state_matrix[-fr_idx,1] <- "s"
       
-      #create dosage matrix 
-      dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
       dosage_matrix[fr_idx,] <- NA
       dosage_matrix[-fr_idx,] <- 0
+      
+    }
       
       #for each time step 
       for (k in 2:200) {
@@ -1372,6 +1381,11 @@ for (i in unique(data$drop_ID)) {
               }
             }
           } else { #eel is susceptible to hide
+            
+            if (K == 0) {
+              private_response <- 0
+              social_response <- 0
+            } else {
             #Check if responds to private cue of the ball, just delayed
             eta_j <-  as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k) #Interecept (let's just fit it with the threshold) and RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
             #convert this to a standard logistic transform - gives probability per eel
@@ -1391,23 +1405,25 @@ for (i in unique(data$drop_ID)) {
               norm_cuml_dose <- cuml_dose/K
               social_response <- ifelse(norm_cuml_dose > social_threshold, 1, 0)
             }
-            
-            if (social_response == 1 | private_response == 1) {
-              state_matrix[j,k] <- "i"
-              social_private_frame_recorder_matrix[j] <- k
-              
-              #Dosing only starts next timestep
-              
+          }
+            if (!is.na(social_response) & !is.na(private_response)) {
+              if (social_response == 1 | private_response == 1) {
+                state_matrix[j,k] <- "i"
+                social_private_frame_recorder_matrix[j] <- k
+              } else {
+                state_matrix[j,k] <- "s"
+              }
             } else {
               state_matrix[j,k] <- "s"
             }
             }
         }
       }
-    }
-    social_private_frame_recorder_list[[i]][[sim]] <- social_private_frame_recorder_matrix
   }
+    social_private_frame_recorder_list[[i]][[sim]] <- social_private_frame_recorder_matrix
 }
+
+
 
 #Next step 
 # - make the non social model look like the social model - done
