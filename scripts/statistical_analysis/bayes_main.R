@@ -105,7 +105,7 @@ full_both_spread_model <- brm(formula = rank_prop ~
     family = Beta(),
     save_pars = save_pars(all = TRUE),
     #family = cumulative("logit"), works with prior(normal(0, 10), class = "Intercept")
-    sample_prior = "only",
+    #sample_prior = "only",
     prior = c(#prior(normal(0, 1), class = "b"),
       #prior(normal(0, 10), class = "Intercept"),
       #prior(exponential(1), class = "sd")),

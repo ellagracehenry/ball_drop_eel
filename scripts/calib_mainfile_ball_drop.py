@@ -9,11 +9,11 @@ from calib_functions_ball_drop import *
 #Enter the path to the focal follow csv file.
 CSV_Path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Raw_Data/Curacao_2024/garden_eels/position_drop_experiment/ball_drop_data.xlsx"
 #Enter the path/name for your output csv file.
-Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/ball_drop_garden_eel/triangulation/final_triangulation/calib_results_trial14.xlsx"
+Output_calib="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/ball_drop_garden_eel/triangulation/final_triangulation/calib_results_trial17_1.xlsx"
 #Path for triangulated points
-output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/ball_drop_garden_eel/triangulation/final_triangulation/ball_drop_data_3D_trial14.xlsx"
+output_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/ball_drop_garden_eel/triangulation/final_triangulation/ball_drop_data_3D_trial17_1.xlsx"
 #Base path for frames
-base_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/ball_drop_garden_eel/triangulation/triangulation_frames"
+base_path="/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/Shared drives/Field Research Videos/Gil Lab/Ella_Henry/PROJECTS/ball_drop/triangulation_frames"
 
 
 #Enter sheet name here
@@ -61,7 +61,8 @@ End_Col2="calib_end_time2"
 Folder_Col1="calib_1_path"
 Folder_Col2="calib_2_path"
 
-df = df[df["trial_ID"] == 14]
+df = df[df["trial_ID"] == 17]
+df = df[df["drop_ID"] == 122]
 
 current_trial_id = None
 

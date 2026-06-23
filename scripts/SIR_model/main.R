@@ -35,10 +35,10 @@ data <- read_excel("final_master_ball_drop_3D.xlsx") %>%
   filter(drop_ID != 147) %>%
   filter(drop_ID != 180) %>%
   filter(drop_ID != 179) %>%
-  filter(trial_ID != 5) %>%
+  #filter(trial_ID != 5) %>%
   filter(drop_ID != 173) %>%
-  filter(trial_ID != 17)%>% #needs correcting annotations %>%
-filter(drop_ID != 149)  #two 156s?
+  filter(trial_ID != 17) %>% #needs correcting annotations %>%
+  filter(drop_ID != 149)  #two 156s?
 
 data %>%
   group_by(colony) %>%
@@ -104,7 +104,7 @@ ball_global <- data %>%
     # eels with both drop-space AND global positions, sorted by distance to ball
     landmarks <- drop_data %>%
       filter(!is.na(base_X), !is.na(global_X), !is.na(distance_to_ball)) %>%
-      filter(base_reproj_error < 5) %>%  # only well-triangulated eels as landmarks. DOES EVERYTHING GO TO SHIT IF THIS IS REMOVED?? CURRENTLY IT CULLS TRIAL 12 AND 14
+      #filter(base_reproj_error < 5) %>%  # TO DO! CONFIRM WHETHER WE WANT THIS FILTER OR NOT. only well-triangulated eels as landmarks. DOES EVERYTHING GO TO SHIT IF THIS IS REMOVED?? CURRENTLY IT CULLS TRIAL 12 AND 14
       slice_min(distance_to_ball, n = 3, with_ties = FALSE)
     
     if (nrow(landmarks) < 3) {
