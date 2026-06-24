@@ -1,9 +1,4 @@
-library(brms)
-library(loo)
-library(pROC)
-library(rstanarm)
-library(report)
-library(tidybayes)
+get_coefs <- function(data) {
 
 hpdi <- function (samp, prob = 0.95) {
   vals <- sort(samp)
@@ -1641,3 +1636,6 @@ tjur_r2
 # AUC — discrimination across full ranking
 roc(initator_responder$second_responder, pred_probs)
 
+return(coefs)
+
+}
