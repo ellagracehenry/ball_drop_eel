@@ -1,100 +1,112 @@
-
-
-
-non_social_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
-names(non_social_frame_recorder_list) <- unique(data$drop_ID)
-
-for (i in unique(data$drop_ID)) {
+private_model <- function(data, params, coefs, n_sims) {
   
-  print(i)
+  range <- as.numeric(params['range'])
+  ball_decay_time_coef <- as.numeric(params['ball_decay_time_coef'])
+  social_decay_time_coef <- as.numeric(params['social_decay_time_coef'])
+  private_threshold <- as.numeric(params['private_threshold'])
+  social_threshold <- as.numeric(params['social_threshold'])
+  tr <- as.numeric(params['tr'])
+  tm <- as.numeric(params['tm'])
+  fractional_contagion_first <- as.character(params['fractional_contagion_first'])
+  fractional_contagion_subs <- as.character(params['fractional_contagion_subs'])
   
-  non_social_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
+  non_social_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
+  names(non_social_frame_recorder_list) <- unique(data$drop_ID)
   
-  #Calculate which individuals are emerged 
-  drop_data <- data %>%
-    filter(drop_ID == i & emerged == 1 & !is.na(global_X)) 
-  
-  drop_eel_IDs <- unique(drop_data$colony_eel_ID)
-  
-  if (length(drop_eel_IDs) < 3) next
-  
-  for (sim in 1:n_sims) {
+  for (i in unique(data$drop_ID)) {
     
-    #create a frame recorder matrix
-    non_social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))   
+    print(i)
     
-    resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
+    non_social_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
     
-    colony_idx <- which(unique(data$colony) == first(drop_data$colony))
+    #Calculate which individuals are emerged 
+    drop_data <- data %>%
+      filter(drop_ID == i & emerged == 1 & !is.na(global_X)) 
     
-    #determine first responder
-    for (h in 1:length(drop_eel_IDs)) {
-      l_drop_ID <- first(drop_data$drop_ID)
-      l_colony_eel_ID <- drop_data$colony_eel_ID[h]
-      l_date <- first(drop_data$date)
-      l_colony <- first(drop_data$colony)
-      #for each eel i in drop j nested in colony k, compute the linear predictor
-      eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[h])
-      #convert this to a standard logistic transform - gives probability per eel
-      p_private_cue <- 1/(1+exp(-eta_j))
-      resp_data[h,1] <- l_colony_eel_ID
-      resp_data[h,2] <- p_private_cue
-      resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_private_cue)
-      resp_data[h,4] <- resp_data[h,3]
-      resp_data[h,5] <- ifelse(resp_data[h,4] > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
-    }
+    drop_eel_IDs <- unique(drop_data$colony_eel_ID)
     
-    #if there is a first responder
-    if (sum(resp_data[,5], na.rm = TRUE) > 0) {
+    if (length(drop_eel_IDs) < 3) next
+    
+    for (sim in 1:n_sims) {
       
-      #find IDs of first responder
-      fr_ID <- resp_data$V1[resp_data$V5 == 1]
+      #create a frame recorder matrix
+      non_social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))   
       
-      #find index of first responder
-      fr_idx <- which(drop_eel_IDs %in% fr_ID)
+      resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
       
-      non_social_frame_recorder_matrix[fr_idx] <- 1
+      colony_idx <- which(unique(data$colony) == first(drop_data$colony))
       
-      #create state matrix 
-      state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
-      state_matrix[fr_idx,1] <- "i"
-      state_matrix[-fr_idx,1] <- "s"
+      #determine first responder
+      for (h in 1:length(drop_eel_IDs)) {
+        l_drop_ID <- first(drop_data$drop_ID)
+        l_colony_eel_ID <- drop_data$colony_eel_ID[h]
+        l_date <- first(drop_data$date)
+        l_colony <- first(drop_data$colony)
+        #for each eel i in drop j nested in colony k, compute the linear predictor
+        eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[h])
+        #convert this to a standard logistic transform - gives probability per eel
+        p_private_cue <- 1/(1+exp(-eta_j))
+        resp_data[h,1] <- l_colony_eel_ID
+        resp_data[h,2] <- p_private_cue
+        resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_private_cue)
+        resp_data[h,4] <- resp_data[h,3]
+        resp_data[h,5] <- ifelse(resp_data[h,4] > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
+      }
       
-      #for each time step
-      for (k in 2:30) {
-        for (j in 1:length(drop_eel_IDs)) {
-          focal_eel_ID <- drop_eel_IDs[j]
-          
-          if (state_matrix[j,k-1] == "r") { #if eel is recovered
-            state_matrix[j,k] <- "r"
-          } else if (state_matrix[j,k-1] == "i") { #if eel is infected
-            if (k-tr <= 0) {
-              state_matrix[j,k] <- "i"
-            } else {
-              if (state_matrix[j,k-tr] == "i") {
-                state_matrix[j,k] <- "r"
-              } else {
-                state_matrix[j,k] <- "i"
-              }
-            }
-          } else { #eel is susceptible to hide
-            #check if eel responds to private cue of the ball, just delayed
-            eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k)
-            p_private_cue <- 1/(1+exp(-eta_j))
-            private_cue_received <- rbinom(n = 1, size = 1, prob = p_private_cue) 
-            private_response <- ifelse(private_cue_received/K > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
+      #if there is a first responder
+      if (sum(resp_data[,5], na.rm = TRUE) > 0) {
+        
+        #find IDs of first responder
+        fr_ID <- resp_data$V1[resp_data$V5 == 1]
+        
+        #find index of first responder
+        fr_idx <- which(drop_eel_IDs %in% fr_ID)
+        
+        non_social_frame_recorder_matrix[fr_idx] <- 1
+        
+        #create state matrix 
+        state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
+        state_matrix[fr_idx,1] <- "i"
+        state_matrix[-fr_idx,1] <- "s"
+        
+        #for each time step
+        for (k in 2:30) {
+          for (j in 1:length(drop_eel_IDs)) {
+            focal_eel_ID <- drop_eel_IDs[j]
             
-            if (private_response == 1) {
-              state_matrix[j,k] <- "i"
-              non_social_frame_recorder_matrix[j] <- k
-            } else {
-              state_matrix[j,k] <- "s"
+            if (state_matrix[j,k-1] == "r") { #if eel is recovered
+              state_matrix[j,k] <- "r"
+            } else if (state_matrix[j,k-1] == "i") { #if eel is infected
+              if (k-tr <= 0) {
+                state_matrix[j,k] <- "i"
+              } else {
+                if (state_matrix[j,k-tr] == "i") {
+                  state_matrix[j,k] <- "r"
+                } else {
+                  state_matrix[j,k] <- "i"
+                }
+              }
+            } else { #eel is susceptible to hide
+              #check if eel responds to private cue of the ball, just delayed
+              eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k)
+              p_private_cue <- 1/(1+exp(-eta_j))
+              private_cue_received <- rbinom(n = 1, size = 1, prob = p_private_cue) 
+              private_response <- ifelse(private_cue_received/K > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
+              
+              if (private_response == 1) {
+                state_matrix[j,k] <- "i"
+                non_social_frame_recorder_matrix[j] <- k
+              } else {
+                state_matrix[j,k] <- "s"
+              }
             }
           }
         }
+        
+        non_social_frame_recorder_list[[i]][[sim]] <- non_social_frame_recorder_matrix
       }
-      
-      non_social_frame_recorder_list[[i]][[sim]] <- non_social_frame_recorder_matrix
     }
   }
+  
+  return(non_social_frame_recorder_list)
 }
