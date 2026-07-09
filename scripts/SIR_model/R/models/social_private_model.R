@@ -39,8 +39,6 @@ social_private_model <- function(data_clean, params, coefs, n_sims, fixed) {
     
     if (length(drop_eel_IDs) < 3) next
     
-    eligible_drops <- eligible_drops + 1
-    
     for (sim in 1:n_sims) {
       
       #create a frame recorder matrix

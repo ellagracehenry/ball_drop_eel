@@ -13,13 +13,15 @@ hpdi <- function (samp, prob = 0.95) {
 data_no_first <- data %>% filter(rank_order != 1)
 data_no_first$rank_order <- data_no_first$rank_order - 1
 
-data_no_first$rank_prop <- data_no_first$rank_order/data_no_first$n_responders
+data_no_first$rank_prop <- data_no_first$rank_order/(data_no_first$n_responders) #added 1 to deal with when all respond, is this okay?
 
 data_no_first <- data_no_first |>
   tidyr::drop_na(rank_prop, dist_from_first, distance_to_ball)
 
 data_no_first$dist_from_first_sc <- scale(data_no_first$dist_from_first)
 data_no_first$distance_to_ball_sc <- scale(data_no_first$distance_to_ball)
+
+data_no_first <- data_no_first %>% filter(rank_prop != 1) #%>% filter(rank_prop != 1)
 
 ### Spread of responses within a group
 
@@ -191,9 +193,6 @@ no_private_spread_model <- brm(formula = rank_prop ~
 plot(no_private_spread_model)
 summary(no_private_spread_model) #rhat < 1.01, bulk ess and tail ess > 400
 pp_check(no_private_spread_model, type="dens_overlay",ndraws=200)
-
-
-summary()
 
 # Then compare
 modcompare <- loo_compare(

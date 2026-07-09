@@ -61,7 +61,7 @@ manipulate_data <- function(data) {
       # eels with both drop-space AND global positions, sorted by distance to ball
       landmarks <- drop_data %>%
         filter(!is.na(base_X), !is.na(global_X), !is.na(distance_to_ball)) %>%
-        #filter(base_reproj_error < 5) %>%  # TO DO! CONFIRM WHETHER WE WANT THIS FILTER OR NOT. only well-triangulated eels as landmarks. DOES EVERYTHING GO TO SHIT IF THIS IS REMOVED?? CURRENTLY IT CULLS TRIAL 12 AND 14
+        filter(base_reproj_error < 5) %>%  # TO DO! CONFIRM WHETHER WE WANT THIS FILTER OR NOT. only well-triangulated eels as landmarks. DOES EVERYTHING GO TO SHIT IF THIS IS REMOVED?? CURRENTLY IT CULLS TRIAL 12 AND 14
         slice_min(distance_to_ball, n = 3, with_ties = FALSE)
       
       if (nrow(landmarks) < 3) {
@@ -130,6 +130,13 @@ manipulate_data <- function(data) {
       # Step 1: true chronological rank (matches true ordering exactly)
       raw_rank = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),
                       na.last = "keep", ties.method = "min"),
+      
+      #Step 1b: true DENSE chronological rank (1, 2, 2, 3)
+      #raw_rank = ifelse(
+      #  full_partial_none != 0,
+      #  dense_rank(response_frame_cam1),
+      #  NA_integer_
+      #),
       
       # Step 2: find initiator frame (matches true ordering first_index logic)
       first_index = if (first(any_response)) 

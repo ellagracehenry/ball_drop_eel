@@ -23,6 +23,7 @@ library(pROC)
 library(rstanarm)
 library(report)
 library(tidybayes)
+library("optimParallel")
 
 #Scripts
 source("~/Desktop/PhD/academic_projects/ball_drop_eel/scripts/SIR_model/R/sharededge.R")
@@ -36,19 +37,15 @@ source("~/Desktop/PhD/academic_projects/ball_drop_eel/scripts/SIR_model/R/cascad
 
 ##Load in data
 setwd("/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/ball_drop_garden_eel/triangulation/final_triangulation")
-data <- read_excel("final_master_ball_drop_3D.xlsx") %>%
-  filter(drop_ID != 152) %>%
-  filter (drop_ID != 169) %>%
+data <- read_excel("final_final_master_ball_drop_3D.xlsx") %>%
   filter (drop_ID != 146) %>%
   filter(drop_ID != 176) %>%
   filter(drop_ID != 157) %>%
   filter(drop_ID != 147) %>%
   filter(drop_ID != 180) %>%
-  filter(drop_ID != 179) %>%
+  filter(drop_ID != 149) #%>%
   #filter(trial_ID != 5) %>%
-  filter(drop_ID != 173) %>%
-  filter(trial_ID != 17) %>% #needs correcting annotations %>%
-  filter(drop_ID != 149)  #two 156s?
+  #filter(trial_ID != 17) #adding in seems to completely reverse the results. Check why. 
 
 #Check how many unique drops per colony
 data %>%
@@ -64,6 +61,7 @@ data_clean$log_inst_topo_dist_from_first_sc <- scale(data_clean$log_inst_topo_di
 orig_topo_mean <- attr(initator_responder$log_inst_topo_dist_sc, "scaled:center")
 orig_topo_sd   <- attr(initator_responder$log_inst_topo_dist_sc, "scaled:scale")
 
+data <- data_clean
 ##Statistical model fit - choose model, get parameters for first and second responder model
 coefs <- get_coefs(data_clean)
 coefs <- list() #(all on scaled!)
@@ -92,9 +90,20 @@ fixed <- expand.grid(range = max(ranges$range), tr = c(5), tm = c(4), fractional
 param_list <- split(param_grids, seq(nrow(param_grids)))
   
 starting_values <- param_list[[i]]
+starting_values <- unlist(starting_values)
   
 #Fit each model type from same starting vals with maximum likelihood
+cl <- makeCluster(5)     # set the number of processor cores
+setDefaultCluster(cl=cl) # set 'cl' as default cluster
+parallel::clusterEvalQ(cl, {
+  library(dplyr)
+  library(magrittr)
+})
+sp_fit <- optimParallel(par = starting_values, fn = cascade_size_nll, model = social_private_model, data_clean = data_clean, coefs = coefs, n_sims = n_sims, fixed = fixed)
+
 sp_fit <- optim(par = starting_values, fn = cascade_size_nll, model = social_private_model, data_clean = data_clean, coefs = coefs, n_sims = n_sims, fixed = fixed)
+
+
 p_fit <- optim(par = starting_values, fn = cascade_size_nll, model = private_model, data_clean = data_clean, coefs = coefs, n_sims = n_sims, fixed = fixed)
 s_fit <- optim(par = starting_values, fn = cascade_size_nll, model = social_model, data_clean = data_clean, coefs = coefs, n_sims = n_sims, fixed = fixed)
 

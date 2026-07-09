@@ -1,5 +1,5 @@
 
-social_model <- function(data, params, n_sims) {
+social_model <- function(data, params, coefs, n_sims) {
   
   range <- as.numeric(params['range'])
   ball_decay_time_coef <- as.numeric(params['ball_decay_time_coef'])
