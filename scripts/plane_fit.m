@@ -67,7 +67,7 @@ for i = 1:length(unique(imgcoordsRC_all{:,"drop_ID"}))
 
     final = [imgcoordsRC, newdat];
 
-    diff = sqrt((final{:,56} - final{:,69}).^2 +  (final{:,57} - final{:,70}).^2 + (final{:,58} - final{:,71}).^2)
+    diff = sqrt((final{:,56} - final{:,68}).^2 +  (final{:,57} - final{:,69}).^2 + (final{:,58} - final{:,70}).^2)
 
     diff = array2table(diff, ...
         'VariableNames',{'plane_projection_diff'});

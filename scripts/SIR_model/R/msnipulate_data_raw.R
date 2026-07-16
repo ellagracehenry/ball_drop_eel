@@ -1,4 +1,4 @@
-manipulate_data_collapsed <- function(data) {
+manipulate_data_raw <- function(data) {
   
   
   data$colony_drop_ID <- paste(data$drop_ID,":",data$colony,sep="")
@@ -6,7 +6,7 @@ manipulate_data_collapsed <- function(data) {
   
   data$distance_to_ball <- sqrt((data$base_X - data$ball_hit_X)^2 + (data$base_Y - data$ball_hit_Y)^2 + (data$base_Z - data$ball_hit_Z)^2)
   
-  #Computing global distances
+  #Computing global distances using reference trials and 3 landmark eels near ball
   
   # --- reference trials per colony ---
   ref_trials <- c("S5" = 1, "S9" = 2, "S15" = 7, "S12" = 13, "S7" = 17)
@@ -119,47 +119,70 @@ manipulate_data_collapsed <- function(data) {
     group_by(drop_ID) %>%
     mutate(inst_emerged = sum(!is.na(full_partial_none))) %>%
     ungroup()
-
-  #Incorporating time lag. 
+  
+  # data <- data %>%
+  #   group_by(drop_ID) %>%
+  #   mutate(
+  #     emerged = as.integer(!is.na(full_partial_none)),
+  #     any_response = any(full_partial_none != 0 & !is.na(full_partial_none)),
+  #     rank_order = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),
+  #                       na.last = "keep", ties.method = "min"),
+  #     first_responder = case_when(rank_order == 1 ~ 1, emerged == 1 & binary_response == 0 ~ 0, emerged == 1 & rank_order > 1 ~0, TRUE ~ NA_real_),
+  #     first_index = if (first(any_response)) which.min(ifelse(first_responder == 1, response_frame_cam1, Inf)) else NA_integer_,
+  #     second_responder = case_when(!any_response ~ NA_real_, rank_order == 1 ~ NA, rank_order == 2 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+  #     third_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2) ~ NA, rank_order == 3 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+  #     fourth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3) ~ NA, rank_order == 4 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+  #     fifth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4)  ~ NA, rank_order == 5 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+  #     sixth_responder = case_when(!any_response ~ NA_real_, rank_order %in% c(1,2,3,4,5)  ~ NA, rank_order == 6 ~ 1, emerged == 1 ~ 0, TRUE ~ NA_real_),
+  #     subsequent_responder = case_when(!any_response ~ NA_real_, emerged == 0 ~ NA_real_, rank_order == 1 ~ NA_real_, binary_response == 0 ~ 0, rank_order > 1 ~ 1),
+  #     first_x = global_X[first_index],
+  #     first_y = global_Y[first_index],
+  #     first_z = global_Z[first_index],
+  #     # Compute distance only for emerged
+  #     time_lag_since_first =
+  #       response_frame_cam1 - response_frame_cam1[first_index]
+  #     ) %>%
+  #   ungroup()
+  
+  #Rank eels by response order 
   data <- data %>%
     group_by(drop_ID) %>%
+    arrange(response_frame_cam1, .by_group = TRUE) %>%
     mutate(
       emerged = as.integer(!is.na(full_partial_none)),
       any_response = any(full_partial_none != 0 & !is.na(full_partial_none)),
       
-      # Step 1: true chronological rank (matches true ordering exactly)
-      raw_rank = rank(ifelse(full_partial_none != 0, response_frame_cam1, NA),
-                      na.last = "keep", ties.method = "min"),
+      # Time of actual responses only
+      response_time = if_else(
+        full_partial_none != 0,
+        response_frame_cam1,
+        NA_real_
+      ),
       
-      #Step 1b: true DENSE chronological rank (1, 2, 2, 3)
-      #raw_rank = ifelse(
-      #  full_partial_none != 0,
-      #  dense_rank(response_frame_cam1),
-      #  NA_integer_
-      #),
+      # First response time
+      initiator_frame = if_else(
+        any_response,
+        min(response_time, na.rm = TRUE),
+        NA_real_
+      ),
       
-      # Step 2: find initiator frame (matches true ordering first_index logic)
-      first_index = if (first(any_response)) 
-        which.min(ifelse(raw_rank == 1, response_frame_cam1, Inf)) 
-      else NA_integer_,
+      time_lag_since_first = response_frame_cam1 - initiator_frame,
       
-      first_ID = colony_eel_ID[first_index],
+      # Keep first responders and responses >4 frames after first
+      keep_responder = !is.na(response_time) &
+        (time_lag_since_first == 0 | time_lag_since_first > 4),
       
-      initiator_frame = response_frame_cam1[first_index],
-      time_from_init = response_frame_cam1 - initiator_frame
+      # Placeholder
+      rank_order = NA_integer_
     ) %>%
-    
-    # Step 3: collapse within-threshold individuals to rank 1 (only change from true ordering)
     mutate(
-      n_first = sum(time_from_init <= 4 & !is.na(raw_rank), na.rm = TRUE),
-      rank_order = case_when(
-        is.na(raw_rank)      ~ NA_real_,
-        time_from_init <= 4 ~ 1,
-        TRUE                 ~ raw_rank - (n_first - 1)
-      )
-    ) %>%
-    
-    mutate(
+      # Assign ranks based on response time; ties receive same rank
+      rank_order = replace(
+        rank_order,
+        keep_responder,
+        dense_rank(response_time[keep_responder])
+      ),
+      
       first_responder = case_when(
         rank_order == 1 ~ 1,
         emerged == 1 & binary_response == 0 ~ 0,
@@ -167,41 +190,53 @@ manipulate_data_collapsed <- function(data) {
         TRUE ~ NA_real_
       ),
       
+      technical_first_responder = case_when(
+        time_lag_since_first <= 4 ~ 1,
+        emerged == 1 & binary_response == 0 ~ 0,
+        emerged == 1 & rank_order > 1 ~ 0,
+        TRUE ~ NA_real_
+      ),
+      
       second_responder = case_when(
         !any_response ~ NA_real_,
-        rank_order == 1 ~ NA,
+        rank_order == 1 ~ NA_real_,
         rank_order == 2 ~ 1,
         emerged == 1 ~ 0,
         TRUE ~ NA_real_
       ),
+      
       third_responder = case_when(
         !any_response ~ NA_real_,
-        rank_order %in% c(1,2) ~ NA,
+        rank_order %in% c(1, 2) ~ NA_real_,
         rank_order == 3 ~ 1,
         emerged == 1 ~ 0,
         TRUE ~ NA_real_
       ),
+      
       fourth_responder = case_when(
         !any_response ~ NA_real_,
-        rank_order %in% c(1,2,3) ~ NA,
+        rank_order %in% c(1, 2, 3) ~ NA_real_,
         rank_order == 4 ~ 1,
         emerged == 1 ~ 0,
         TRUE ~ NA_real_
       ),
+      
       fifth_responder = case_when(
         !any_response ~ NA_real_,
-        rank_order %in% c(1,2,3,4) ~ NA,
+        rank_order %in% c(1, 2, 3, 4) ~ NA_real_,
         rank_order == 5 ~ 1,
         emerged == 1 ~ 0,
         TRUE ~ NA_real_
       ),
+      
       sixth_responder = case_when(
         !any_response ~ NA_real_,
-        rank_order %in% c(1,2,3,4,5) ~ NA,
+        rank_order %in% c(1, 2, 3, 4, 5) ~ NA_real_,
         rank_order == 6 ~ 1,
         emerged == 1 ~ 0,
         TRUE ~ NA_real_
       ),
+      
       subsequent_responder = case_when(
         !any_response ~ NA_real_,
         emerged == 0 ~ NA_real_,
@@ -210,12 +245,18 @@ manipulate_data_collapsed <- function(data) {
         rank_order > 1 ~ 1
       ),
       
+      first_index = if_else(
+        any_response,
+        which(response_time == initiator_frame)[1],
+        NA_integer_
+      ),
+      
       first_x = global_X[first_index],
       first_y = global_Y[first_index],
-      first_z = global_Z[first_index],
-      time_lag_since_first = time_from_init
+      first_z = global_Z[first_index]
     ) %>%
     ungroup()
+ 
   
   data <- data %>%
     group_by(drop_ID) %>%
@@ -237,22 +278,33 @@ manipulate_data_collapsed <- function(data) {
   
   #computing other social metrics
   for (g in unique(data$drop_ID)) {
+    #if number of emerged individuals is more than 2 
     if (sum(data$emerged[data$drop_ID == g], na.rm=TRUE) > 2) {
+      #for each eel
       for (gg in unique(data$colony_eel_ID[data$drop_ID == g])) {
         focal <- gg
         focal_colony <- data$colony[data$colony_eel_ID == gg & data$drop_ID == g] 
         emerged <- data$colony_eel_ID[data$drop_ID == g & data$emerged == 1]
         focal_positions <- NA
         global_positions_sub <- global_positions[!is.na(global_positions$global_X),]
+        #if there is a global position for focal
         if (focal %in% global_positions$colony_eel_ID) {
+          #if it is emerged
           if (data$emerged[data$colony_eel_ID == gg & data$drop_ID == g] == 1) {
             #Global
+            #take the global positions for that colony
             focal_global_positions <- global_positions_sub[global_positions_sub$colony == focal_colony & !is.na(global_positions_sub$global_X),]
+            #calculate others distance to focal
             focal_global_positions$distance_to_focal <- sqrt((focal_global_positions$global_X - focal_global_positions$global_X[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Y - focal_global_positions$global_Y[focal_global_positions$colony_eel_ID == focal])^2 + (focal_global_positions$global_Z - focal_global_positions$global_Z[focal_global_positions$colony_eel_ID == focal])^2)
+            #calculate others ranked distance to focal
             focal_global_positions$rank <- rank(focal_global_positions$distance_to_focal, na.last = "keep", ties.method = "first")
+            #order others by rank
             focal_global_positions_ranked <- focal_global_positions[order(focal_global_positions$rank),]
+            #remove self (where distance to focal is 0)
             focal_global_positions_ranked <- focal_global_positions_ranked [focal_global_positions_ranked$distance_to_focal != 0,]
+            #convert ranked ID list to vector
             colony_eel_ID_global_ranked_for_focal <- as.vector(focal_global_positions_ranked$colony_eel_ID)
+            #fit to plane for voronoi neighbourhood assignment 
             center <- colMeans(focal_global_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
             pts_centered <- sweep(as.matrix(focal_global_positions[,c("global_X","global_Y","global_Z")],), 2, center) #centre points
             pca <- prcomp(pts_centered, center =FALSE) #fit plane via PCA, 3rd PC to normal to the best-fit plane
@@ -282,7 +334,7 @@ manipulate_data_collapsed <- function(data) {
             }
             shared_edge_lengths <- sharededge(points)
             
-            # Extract neighbour list
+            # Extract voronoi neighbour list
             voronoi_neighbours_df <- do.call(rbind, lapply(seq_len(nrow(pts_rotated)), function(i) {
               neighbour_rows <- shared_edge_lengths[shared_edge_lengths$ind1 == i | 
                                                       shared_edge_lengths$ind2 == i, ]
@@ -295,18 +347,26 @@ manipulate_data_collapsed <- function(data) {
               )
             }))
             
+            #extract as list for each focal
             global_v_neighbours_list <- voronoi_neighbours_df %>%
               group_by(focal) %>%
               summarise(v_neighbours = list(neighbour))
             
             #Instantaneous
+            #take all the emerged individuals
             focal_inst_positions <- focal_global_positions[focal_global_positions$colony_eel_ID %in% emerged, ]
             focal_inst_positions$distance_to_focal <- NA
+            #calculate distance to focal 
             focal_inst_positions$distance_to_focal <- sqrt((focal_inst_positions$global_X - focal_inst_positions$global_X[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Y - focal_inst_positions$global_Y[focal_inst_positions$colony_eel_ID == focal])^2 + (focal_inst_positions$global_Z - focal_inst_positions$global_Z[focal_inst_positions$colony_eel_ID == focal])^2)
+            #calculate ranked distance to focal
             focal_inst_positions$rank <- rank(focal_inst_positions$distance_to_focal, na.last = "keep", ties.method = "min")
+            #order them
             focal_inst_positions_ranked <- focal_inst_positions[order(focal_inst_positions$rank),]
+            #remove self
             focal_inst_positions_ranked <- focal_inst_positions_ranked[focal_inst_positions_ranked$distance_to_focal != 0,]
+            #convert to vector
             colony_eel_ID_inst_ranked_for_focal <- as.vector(focal_inst_positions_ranked$colony_eel_ID)
+            #Plane fit for voronoi
             center <- colMeans(focal_inst_positions[,c("global_X", "global_Y", "global_Z")], na.rm=TRUE) #get centre
             pts_centered <- sweep(as.matrix(focal_inst_positions[,c("global_X","global_Y","global_Z")]), 2, center) #centre points
             pca <- prcomp(pts_centered, center =FALSE) #fit plane via PCA, 3rd PC to normal to the best-fit plane
@@ -365,6 +425,10 @@ manipulate_data_collapsed <- function(data) {
               slice_min(response_frame_cam1, n = 1, with_ties = FALSE) %>%
               pull(colony_eel_ID)
             
+            technical_first_responder_id <- data %>%
+              filter(drop_ID == g, technical_first_responder == 1) %>%
+              pull(colony_eel_ID)
+            
             # check for exact ties among rank_order == 1
             n_exact_ties <- data %>%
               filter(drop_ID == g, first_responder == 1) %>%
@@ -377,7 +441,7 @@ manipulate_data_collapsed <- function(data) {
             
             n_first_responders <- sum(data$drop_ID == g & data$first_responder == 1, na.rm = TRUE)
             
-            if (n_first_responders == 1 && first_has_global && first_responder_id != gg) {
+            if (n_first_responders == 1 && first_has_global && first_responder_id != gg &&  !(gg %in% technical_first_responder_id)) {
               # all the distance calculations — unchanged
               data$dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id]
               data$log_dist_from_first[data$colony_eel_ID == gg & data$drop_ID == g] <- log(focal_global_positions$distance_to_focal[focal_global_positions$colony_eel_ID == first_responder_id])
@@ -397,5 +461,5 @@ manipulate_data_collapsed <- function(data) {
   }
   
   return(data)
-
+  
 }
