@@ -1,28 +1,44 @@
 
-social_model <- function(data, params, coefs, n_sims) {
+social_model <- function(data_clean, initator_responder, params, coefs, n_sims, fixed, n_time) {
   
-  range <- as.numeric(params['range'])
+  data <- data_clean
+  n_sims <- n_sims
+  coefs <- coefs
+  n_time <- n_time
+  
+  drop_data_groups <- data_clean %>% 
+    filter(emerged == 1, !is.na(global_X))
+  
+  drop_data_list <- data_clean %>% 
+    filter(emerged == 1, !is.na(global_X)) %>% 
+    split(.$drop_ID) # Natively names the list items by drop_ID
+  
+  orig_topo_mean <- attr(initator_responder$log_inst_topo_dist_sc, "scaled:center")
+  orig_topo_sd   <- attr(initator_responder$log_inst_topo_dist_sc, "scaled:scale")
+  
+  #range <- as.numeric(fixed['range'])
   ball_decay_time_coef <- as.numeric(params['ball_decay_time_coef'])
   social_decay_time_coef <- as.numeric(params['social_decay_time_coef'])
   private_threshold <- as.numeric(params['private_threshold'])
   social_threshold <- as.numeric(params['social_threshold'])
-  tr <- as.numeric(params['tr'])
-  tm <- as.numeric(params['tm'])
-  fractional_contagion_first <- as.character(params['fractional_contagion_first'])
-  fractional_contagion_subs <- as.character(params['fractional_contagion_subs'])
+  tr <- as.numeric(fixed['tr'])
+  tm <- as.numeric(fixed['tm'])
+  fractional_contagion_first <- as.logical(fixed['fractional_contagion_first'])
+  fractional_contagion_subs <- as.logical(fixed['fractional_contagion_subs'])
+  max_rate <- as.numeric(fixed['max_rate'])
+  dt <- as.numeric(fixed['dt'])
+  da <- as.numeric(fixed['da'])
   
-  social_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
-  names(social_frame_recorder_list) <- unique(data$drop_ID)
+  social_private_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
+  names(social_private_frame_recorder_list) <- unique(data$drop_ID)
   
   for (i in unique(data$drop_ID)) {
     
     print(i)
-    
-    social_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
+    social_private_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
     
     #Calculate which individuals are emerged 
-    drop_data <- data %>%
-      filter(drop_ID == i & emerged == 1 & !is.na(global_X)) # & !is.na(dist_from_first_resp)
+    drop_data <- drop_data_list[[as.character(i)]]
     
     drop_eel_IDs <- unique(drop_data$colony_eel_ID)
     
@@ -32,12 +48,16 @@ social_model <- function(data, params, coefs, n_sims) {
       K_first <- 1
     }
     
+    #if (is.na(sum(drop_data$distance_to_ball, na.rm=TRUE))) next
+    
     if (length(drop_eel_IDs) < 3) next
     
     for (sim in 1:n_sims) {
       
+      #print("starting sim")
+      #print(sim)
       #create a frame recorder matrix
-      social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
+      social_private_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
       
       resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
       
@@ -53,7 +73,7 @@ social_model <- function(data, params, coefs, n_sims) {
         l_date <- first(drop_data$date)
         l_colony <- first(drop_data$colony)
         #for each eel i in drop j nested in colony k, compute the linear predictor
-        eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball[h]) - ball_decay_time_coef*log(k) #RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
+        eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball_sc[h]) - ball_decay_time_coef*log(k) #RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
         #convert this to a standard logistic transform - gives probability per eel
         p_private_cue <- 1/(1+exp(-eta_j))
         resp_data[h,1] <- l_colony_eel_ID
@@ -61,8 +81,14 @@ social_model <- function(data, params, coefs, n_sims) {
         resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_private_cue)
         resp_data[h,4] <- resp_data[h,3]/K_first
         resp_data[h,5] <- ifelse(resp_data[h,4] > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
-        
       }
+      
+      #create state matrix 
+      state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = n_time)
+      state_matrix[,1] <- "s"
+      #create dosage matrix 
+      dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = n_time)
+      dosage_matrix[,] <- 0
       
       #if there is a first responder
       if (sum(resp_data[,5], na.rm = TRUE) > 0) {
@@ -73,37 +99,63 @@ social_model <- function(data, params, coefs, n_sims) {
         #find index of first responder
         fr_idx <- which(drop_eel_IDs %in% fr_ID)
         
-        social_frame_recorder_matrix[fr_idx] <- 1
+        social_private_frame_recorder_matrix[fr_idx] <- 1
         
-        #create state matrix 
-        state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
-        state_matrix[fr_idx,1] <- "i"
+        for (fr_IDD in fr_idx) {
+          state_matrix[fr_IDD,1] <- "i"
+        }
+        
         state_matrix[-fr_idx,1] <- "s"
         
-        #create dosage matrix 
-        dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 200)
         dosage_matrix[fr_idx,] <- NA
         dosage_matrix[-fr_idx,] <- 0
         
-        #for each time step 
-        for (k in 2:30) {
-          if (fractional_contagion_subs == TRUE) {
-            K <- sum(state_matrix[,k-1] == "s")
-          } else {
-            K <- 1
-          }
-          for (j in 1:length(drop_eel_IDs)) {
-            focal_eel_ID <- drop_eel_IDs[j]
-            
-            #Assigning states
-            if (state_matrix[j,k-1] == "r") { #if eel is recovered
-              state_matrix[j,k] <- "r"
-              dosage_matrix[j,k] <- NA
-            }
-            else if (state_matrix[j,k-1] == "i") { #if eel is infected
-              dosage_matrix[j,k] <- NA #state and frame recorder matrices stay the same
-              frames_since_infected <- k - social_frame_recorder_matrix[j]
-              if (k-tr <= 0) {
+      }
+      
+      #for each time step 
+      for (k in 2:n_time) {
+        if (fractional_contagion_subs == TRUE) {
+          K <- sum(state_matrix[,k-1] == "s")
+        } else {
+          K <- 1
+        }
+        for (j in 1:length(drop_eel_IDs)) {
+          focal_eel_ID <- drop_eel_IDs[j]
+          
+          #Assigning states
+          if (state_matrix[j,k-1] == "r") { #if eel is recovered
+            state_matrix[j,k] <- "r"
+            dosage_matrix[j,k] <- NA
+          } else if (state_matrix[j,k-1] == "i") { #if eel is infected
+            dosage_matrix[j,k] <- NA #state and frame recorder matrices stay the same
+            frames_since_infected <- k - social_private_frame_recorder_matrix[j]
+            if (k-tr <= 0) {
+              state_matrix[j,k] <- "i"
+              
+              #dose everyone
+              for (jj in 1:length(drop_eel_IDs)) {
+                buddy_eel_ID <- drop_eel_IDs[jj]
+                
+                if (buddy_eel_ID == focal_eel_ID) next  # skip self
+                
+                
+                buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
+                rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
+                
+                log_inst_topo_dist_sc <- (log(rank) - orig_topo_mean) / orig_topo_sd
+                
+                eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc - social_decay_time_coef*log(frames_since_infected)
+                p_cue <- 1/(1+exp(-eta_j))
+                if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
+                  dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
+                } else {
+                  
+                }
+              }
+            } else { 
+              if (state_matrix[j,k-tr] == "i") {
+                state_matrix[j,k] <- "r"
+              } else {
                 state_matrix[j,k] <- "i"
                 
                 #dose everyone
@@ -114,7 +166,8 @@ social_model <- function(data, params, coefs, n_sims) {
                   
                   buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
                   rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
-                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
+                  log_inst_topo_dist_sc <- (log(rank) - orig_topo_mean) / orig_topo_sd
+                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc - social_decay_time_coef*log(frames_since_infected)
                   p_cue <- 1/(1+exp(-eta_j))
                   
                   if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
@@ -123,59 +176,52 @@ social_model <- function(data, params, coefs, n_sims) {
                     
                   }
                 }
-              } else { 
-                if (state_matrix[j,k-tr] == "i") {
-                  state_matrix[j,k] <- "r"
-                } else {
-                  state_matrix[j,k] <- "i"
-                  
-                  #dose everyone
-                  for (jj in 1:length(drop_eel_IDs)) {
-                    buddy_eel_ID <- drop_eel_IDs[jj]
-                    
-                    if (buddy_eel_ID == focal_eel_ID) next  # skip self
-                    
-                    buddy_neighbours_ranked <- drop_data$inst_neighbours_topo_ranked[which(drop_data$colony_eel_ID == buddy_eel_ID)]
-                    rank <- which(buddy_neighbours_ranked[[1]] == focal_eel_ID)
-                    eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log(rank) - social_decay_time_coef*log(frames_since_infected)
-                    p_cue <- 1/(1+exp(-eta_j))
-                    
-                    if (rbinom(1,1,p_cue*max_rate*dt) == 1) {
-                      dosage_matrix[jj,k] <- dosage_matrix[jj,k] + da
-                    } else {
-                      
-                    }
-                  }
-                }
               }
-            } else { #eel is susceptible to hide
+            }
+          } else { #eel is susceptible to hide
+            
+            if (K == 0) {
+              private_response <- 0
+              social_response <- 0
+            } else {
+              #Check if responds to private cue of the ball, just delayed
+              eta_j <-  as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k) #Interecept (let's just fit it with the threshold) and RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
+              #convert this to a standard logistic transform - gives probability per eel
+              p_private_cue <- 1/(1+exp(-eta_j))
+              private_cue_received <- rbinom(n = 1, size = 1, prob = p_private_cue) 
+              private_response <- ifelse(private_cue_received/K > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
               
-              #Check if responds to social cues
-              cuml_dose <- sum(dosage_matrix[j, 1:(k-1)], na.rm=TRUE)
-              norm_cuml_dose <- cuml_dose/K
+              cuml_dose <- 0
               
-              social_response <- ifelse(norm_cuml_dose > social_threshold, 1, 0)
-              
-              if (social_response == 1) {
+              if (k <= 5) {
+                social_response <- 0
+              } else {
+                window_end <- k - 5
+                window_start <- max(1, window_end - tm)
+                cuml_dose <- sum(dosage_matrix[j, window_start:window_end], na.rm=TRUE)
+                #Check if responds to social cues
+                norm_cuml_dose <- cuml_dose/K
+                social_response <- ifelse(norm_cuml_dose > social_threshold, 1, 0)
+              }
+            }
+            if (!is.na(social_response) & !is.na(private_response)) {
+              if (social_response == 1 | private_response == 1) {
                 state_matrix[j,k] <- "i"
-                social_frame_recorder_matrix[j] <- k
-                
-                #Dosing only starts next timestep
-                
+                social_private_frame_recorder_matrix[j] <- k
               } else {
                 state_matrix[j,k] <- "s"
               }
+            } else {
+              state_matrix[j,k] <- "s"
             }
           }
         }
       }
-      social_frame_recorder_list[[i]][[sim]] <- social_frame_recorder_matrix
+      social_private_frame_recorder_list[[i]][[sim]] <- social_private_frame_recorder_matrix
     }
   }
   
-  return(social_frame_recorder_list)
+  return(social_private_frame_recorder_list)
   
 }
-
-
 
