@@ -1,4 +1,45 @@
 
+
+cascade_size_nll <- function(par, model, data_clean, initator_responder, coefs, n_sims, fixed, n_time) {
+  
+  model_result <- model(data_clean, initator_responder, par, coefs, n_sims, fixed, n_time)
+  
+  #Calculate log probabilities of cascade size
+  experimental_cascade_size <- data_clean %>%
+    group_by(drop_ID) %>%
+    summarise(n_responders = first(n_responders))
+
+  loglik <- 0
+  
+  for (ii in experimental_cascade_size$drop_ID) {
+    matches <- NULL
+    
+    
+    # Pull the target responder count once before the loop
+    target_responders <- experimental_cascade_size$n_responders[experimental_cascade_size$drop_ID == ii]
+    
+    if (length(target_responders) == 0 || is.na(target_responders)) {
+      next # Skip or set safe default if drop_ID was missing from summary
+    }
+
+    sim_sums <- sapply(model_result[[as.character(ii)]], function(sim_res) sum(!is.na(sim_res[,1])))
+    hits <- sum(sim_sums == target_responders)
+    p_hat <- hits / n_sims
+    p_hat <- max(p_hat, 1/n_sims) # safety floor
+    loglik <- loglik + log(p_hat)
+    
+    
+  }
+  cat("NLL:", -loglik, "\n")
+  flush.console()
+  
+  return(list(
+    nll = -loglik,
+    model_result = model_result))
+  
+}
+
+
 social_private_model <- function(data_clean, initator_responder, params, coefs, n_sims, fixed, n_time) {
   
   data <- data_clean
@@ -77,7 +118,7 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
       drop_eel_ID_thresholds <- runif(length(drop_eel_IDs), min = 0, max = theta_max)
       
       #time step 1
-      k <- 1
+      #k <- 1
       
       #determine first responder
       for (h in 1:length(drop_eel_IDs)) {
@@ -91,6 +132,12 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
         p_private_cue <- 1/(1+exp(-eta_j))
         resp_data[h,1] <- l_colony_eel_ID
         resp_data[h,2] <- p_private_cue
+        if (is.na(p_private_cue) | p_private_cue == 0) {
+          print("zero prob")
+          print(first(drop_data$drop_ID))
+        } else {
+          
+        }
         resp_data[h,3] <- rbinom(n = 1, size = 1, prob = p_private_cue)
         resp_data[h,4] <- resp_data[h,3]#/K_first
         #resp_data[h,5] <- ifelse(resp_data[h,4] > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
@@ -143,11 +190,11 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
           if (state_matrix[j,k-1] == "r") { #if eel is recovered
             
             state_matrix[j,k] <- "r"
-
+            
             
           } else if (state_matrix[j,k-1] == "i") { #if eel is infected
             
-
+            
             frames_since_infected <- k - social_private_frame_recorder_matrix[j,1]
             
             if (!is.na(frames_since_infected) && (frames_since_infected*dt >= tr)) {
@@ -168,9 +215,9 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
                 log_inst_topo_dist_sc <- (log(rank) - orig_topo_mean) / orig_topo_sd
                 
                 if (k < tb) {
-                eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[jj]) #- social_decay_time_coef*log(frames_since_infected)
+                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc #- social_decay_time_coef*log(frames_since_infected)
                 } else {
-                eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc #- social_decay_time_coef*log(frames_since_infected)
+                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc #- social_decay_time_coef*log(frames_since_infected)
                 }
                 
                 w_ij <- 1/(1+exp(-eta_j))
@@ -208,7 +255,7 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
             cuml_dose <- sum(dosage_matrix[j, window_start:k], na.rm=TRUE)
             
             norm_cuml_dose <- cuml_dose#/K #try take out K, see if fits better
-          
+            
             
             if (norm_cuml_dose > drop_eel_ID_thresholds[j]) {
               response <- 1
@@ -218,19 +265,19 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
             
             if (!is.na(response)) {
               if (response == 1) {
-            
+                
                 state_matrix[j,k] <- "i"
                 social_private_frame_recorder_matrix[j,1] <- k
                 social_private_frame_recorder_matrix[j,2] <- norm_cuml_dose
               } else {
                 state_matrix[j,k] <- "s"
+              }
             }
           }
+          
         }
-        
       }
-      }
-        social_private_frame_recorder_list[[as.character(i)]][[sim]] <- social_private_frame_recorder_matrix
+      social_private_frame_recorder_list[[as.character(i)]][[sim]] <- social_private_frame_recorder_matrix
     }
   }
   return(social_private_frame_recorder_list)

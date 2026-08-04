@@ -29,13 +29,13 @@ social_model <- function(data_clean, initator_responder, params, coefs, n_sims, 
   dt <- as.numeric(fixed['dt'])
   da <- as.numeric(fixed['da'])
   
-  social_private_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
-  names(social_private_frame_recorder_list) <- unique(data$drop_ID)
+  social_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
+  names(social_frame_recorder_list) <- unique(data$drop_ID)
   
   for (i in unique(data$drop_ID)) {
     
     print(i)
-    social_private_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
+    social_frame_recorder_list[[i]] <- vector(mode = "list", length = n_sims)
     
     #Calculate which individuals are emerged 
     drop_data <- drop_data_list[[as.character(i)]]
@@ -57,7 +57,7 @@ social_model <- function(data_clean, initator_responder, params, coefs, n_sims, 
       #print("starting sim")
       #print(sim)
       #create a frame recorder matrix
-      social_private_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
+      social_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), dimnames=list(drop_eel_IDs, NULL))
       
       resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=3))
       
@@ -99,7 +99,7 @@ social_model <- function(data_clean, initator_responder, params, coefs, n_sims, 
         #find index of first responder
         fr_idx <- which(drop_eel_IDs %in% fr_ID)
         
-        social_private_frame_recorder_matrix[fr_idx] <- 1
+        social_frame_recorder_matrix[fr_idx] <- 1
         
         for (fr_IDD in fr_idx) {
           state_matrix[fr_IDD,1] <- "i"
@@ -128,7 +128,7 @@ social_model <- function(data_clean, initator_responder, params, coefs, n_sims, 
             dosage_matrix[j,k] <- NA
           } else if (state_matrix[j,k-1] == "i") { #if eel is infected
             dosage_matrix[j,k] <- NA #state and frame recorder matrices stay the same
-            frames_since_infected <- k - social_private_frame_recorder_matrix[j]
+            frames_since_infected <- k - social_frame_recorder_matrix[j]
             if (k-tr <= 0) {
               state_matrix[j,k] <- "i"
               
@@ -184,13 +184,6 @@ social_model <- function(data_clean, initator_responder, params, coefs, n_sims, 
               private_response <- 0
               social_response <- 0
             } else {
-              #Check if responds to private cue of the ball, just delayed
-              eta_j <-  as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID]) - ball_decay_time_coef*log(k) #Interecept (let's just fit it with the threshold) and RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
-              #convert this to a standard logistic transform - gives probability per eel
-              p_private_cue <- 1/(1+exp(-eta_j))
-              private_cue_received <- rbinom(n = 1, size = 1, prob = p_private_cue) 
-              private_response <- ifelse(private_cue_received/K > private_threshold, 1, 0) #private threshold be on scale between 0 and 1
-              
               cuml_dose <- 0
               
               if (k <= 5) {
@@ -204,10 +197,10 @@ social_model <- function(data_clean, initator_responder, params, coefs, n_sims, 
                 social_response <- ifelse(norm_cuml_dose > social_threshold, 1, 0)
               }
             }
-            if (!is.na(social_response) & !is.na(private_response)) {
-              if (social_response == 1 | private_response == 1) {
+            if (!is.na(social_response)) {
+              if (social_response == 1) {
                 state_matrix[j,k] <- "i"
-                social_private_frame_recorder_matrix[j] <- k
+                social_frame_recorder_matrix[j] <- k
               } else {
                 state_matrix[j,k] <- "s"
               }
@@ -217,11 +210,11 @@ social_model <- function(data_clean, initator_responder, params, coefs, n_sims, 
           }
         }
       }
-      social_private_frame_recorder_list[[i]][[sim]] <- social_private_frame_recorder_matrix
+      social_frame_recorder_list[[i]][[sim]] <- social_frame_recorder_matrix
     }
   }
   
-  return(social_private_frame_recorder_list)
+  return(social_frame_recorder_list)
   
 }
 
