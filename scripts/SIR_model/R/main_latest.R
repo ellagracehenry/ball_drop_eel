@@ -102,7 +102,7 @@ n_time <- 200
 
 #METHOD 1: NLL GRID SEARCH
 #Parameter grid 
-param_grids <- expand.grid(social_threshold = seq(0,10,0.5))
+param_grids <- expand.grid(social_threshold = seq(0,10,2), social_decay_time_coef = seq(0,10,2))
 fixed <- expand.grid(tr = c(5), tm = c(4), fractional_contagion_first = c(TRUE), fractional_contagion_subs = c(TRUE), max_rate = max_rate, dt = dt, da = da)
 param_list <- split(param_grids, seq(nrow(param_grids)))
 starting_values <- param_list[[1]]
@@ -120,7 +120,7 @@ data_clean_f <- data_clean %>% filter(drop_ID %in% unique(data_clean_f1$drop_ID)
 drop1_initator_responder <- initator_responder %>% filter(trial_ID %in% c(1))
 
 #Save alp inputs
-write.csv(param_grids, "social_threshold_param_6000sim_frNA_noK_0-10.csv")
+write.csv(param_grids, "social_threshold_ball_decay_time_social_decay_time_noPrivate.csv")
 save(data_clean_f, initator_responder, coefs,
      n_sims, fixed, n_time, file = "SIR_inputs_6000sim_frNA_noK_0-10.RData")
 
@@ -310,7 +310,7 @@ ggplot(social_private_param_results, aes(social_threshold, social_decay_time_coe
 
 model_result <- social_private_model(data_clean_f, initator_responder, starting_values, coefs, n_sims, fixed, n_time)
 
-param_grids <- expand.grid(ball_decay_time_coef = c(2), social_decay_time_coef = c(3), private_threshold = c(0.02), social_threshold = c(3))
+param_grids <- expand.grid(ball_decay_time_coef = se(0,10,2), social_decay_time_coef = c(3), private_threshold = c(0.02), social_threshold = c(3))
 fixed <- expand.grid(tr = c(5), tm = c(4), fractional_contagion_first = c(TRUE), fractional_contagion_subs = c(TRUE), max_rate = max_rate, dt = dt, da = da)
 param_list <- split(param_grids, seq(nrow(param_grids)))
 starting_values <- param_list[[1]]
