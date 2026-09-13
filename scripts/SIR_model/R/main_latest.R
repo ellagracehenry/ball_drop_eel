@@ -61,7 +61,18 @@ data <- read_excel("final_final_master_ball_drop_3D.xlsx") %>%
 ##Manipulate data
 data_clean <- manipulate_data(data)
 data_clean <- manipulate_data_raw(data)
-initator_responder <- generate_initator_responder_data(data_clean)
+
+#filter out times where first responders don't have a global x y z
+data_clean_fr_real <- data_clean %>%
+  group_by(drop_ID) %>%
+  filter(any(first_responder == 1 & !is.na(global_X))) %>%
+  ungroup()
+
+initator_responder <- generate_initator_responder_data(data_clean_fr_real)
+
+
+length(unique(data_clean$drop_ID))
+length(unique(data_clean_fr_real$drop_ID))
 
 #Check how many unique drops per colony
 data_clean %>%
@@ -79,12 +90,11 @@ data <- data_clean
 ##Statistical model fit - choose model, get parameters for first and second responder model
 coefs <- get_coefs(data_clean)
 coefs <- list() #(all on scaled!)
-coefs[1] <- -2.56 #fr intercept NA est
-coefs[2] <- -2.06 #fr log distance from ball NA est
-coefs[3] <- -4.11 #sr intercept
-coefs[4] <- -0.64 #sr log inst topo dist
-coefs[5] <- -0.64 #sr log distance from ball
-
+coefs[1] <- -2.56 #fr intercept
+coefs[2] <- -2.04 #fr log distance from ball
+coefs[3] <- -4.13 #sr intercept
+coefs[4] <- -0.70 #sr log inst topo dist
+coefs[5] <- -0.63 #sr log distance from ball
 
 ##Define parameter sets
 #Frame range of cascades
@@ -102,7 +112,7 @@ n_time <- 200
 
 #METHOD 1: NLL GRID SEARCH
 #Parameter grid 
-param_grids <- expand.grid(social_threshold = seq(0,10,2), social_decay_time_coef = seq(0,10,2))
+param_grids <- expand.grid(social_threshold = seq(5,16,0.1))
 fixed <- expand.grid(tr = c(5), tm = c(4), fractional_contagion_first = c(TRUE), fractional_contagion_subs = c(TRUE), max_rate = max_rate, dt = dt, da = da)
 param_list <- split(param_grids, seq(nrow(param_grids)))
 starting_values <- param_list[[1]]
@@ -113,18 +123,23 @@ ID <- unique(data$drop_ID)
 sample_frac(as.data.frame(unique(data$drop_ID)), 0.8)
 
 data_clean_f <- data_clean %>% filter(drop_ID %in% sample(unique(data$drop_ID), size = length(unique(data$drop_ID))*0.8))
+data_clean_f <- data_clean %>% filter(drop_ID %in% test_IDs)
+#reloading in training data
+load("/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/CrossVal/SIR_inputs_testing_FullDf.RData")
 
-#reloading
-data_clean_f <- data_clean %>% filter(drop_ID %in% unique(data_clean_f1$drop_ID))
+#extracting testing data
+training_IDs <- unique(data_clean_f$drop_ID)
+testing_data <- data_clean %>%
+  filter(!drop_ID %in% training_IDs)
 
 drop1_initator_responder <- initator_responder %>% filter(trial_ID %in% c(1))
 
 #Save alp inputs
-write.csv(param_grids, "social_threshold_ball_decay_time_social_decay_time_noPrivate.csv")
-save(data_clean_f, initator_responder, coefs,
-     n_sims, fixed, n_time, file = "SIR_inputs_6000sim_frNA_noK_0-10.RData")
+write.csv(param_grids, "/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/threshold_decay_size_extent_sweep/social_threshold_ball_decay_time_social_decay_time_extent_noPrivate_noDecay.csv")
+save(data_clean_fr_real, initator_responder, coefs,
+     n_sims, fixed, n_time, file = "SIR_inputs_testing_FullDf.RData")
 
-
+n_sims <- 10000
 #Fit each model type from same starting vals with maximum likelihood
 cl <- makeCluster(6, outfile = "parallel_log_frNA_noK_fine.txt")     # set the number of processor cores
 setDefaultCluster(cl=cl) # set 'cl' as default cluster
@@ -153,7 +168,7 @@ out_nll <- foreach (i = 1:length(param_list), .combine = 'c') %dopar% {
   starting_values <- param_list[[i]]
   starting_values <- unlist(starting_values)
   
-  res <- cascade_size_nll(starting_values, social_private_model, data_clean_f, initator_responder, coefs, n_sims, fixed, n_time)
+  res <- cascade_size_time_nll(starting_values, social_private_model, data_clean, initator_responder, coefs, n_sims, fixed, n_time, time_tol)
   
   res
 
@@ -187,7 +202,13 @@ write.csv(results_table, "combined_sweep_results.csv", row.names = FALSE)
 results_table %>% filter(nll == min(nll, na.rm = TRUE))
 
 #Reading in previous full RDS
-out_nll <- readRDS(file = "/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/output_10000sim_frNA_noK_3-5_SocialPrivate/result_23_254.076843223296.rds")
+out_nll <- readRDS(file = "/Users/ellag/Downloads/result_63_377.443330931615.rds")
+model_result2 <- out_nll[["model_result"]]
+
+out_nll <- readRDS(file = "/Users/ellag/Downloads/result_51_249.701794211708.rds")
+model_result51 <- out_nll[["model_result"]]
+
+
 
 ##Saving cascade size
 # 1. Identify indices for all model_result objects (2, 4, 6, ...)
@@ -199,13 +220,17 @@ all_params_results <- map_df(seq_along(model_res_indices), function(p_idx) {
   # Grab model_result for parameter set p
   mod_res <- out_nll[[model_res_indices[p_idx]]]
   
+  trial_ids <- names(mod_res)
+  
   # Loop over all trials within this parameter set
-  map_df(seq_along(mod_res), function(t_idx) {
+  map_dfr(trial_ids, function(trial_id) {
     
     # Safely get trial ID (handles either named lists or numeric indices)
     #trial_id <- names(mod_res)[t_idx] %||% experimental_cascade_size$drop_ID[t_idx] %||% experimental_cascade_size$drop_ID[[t_idx]]
-    trial_id <- as.character(experimental_cascade_size$drop_ID[t_idx])
+    #trial_id <- as.character(experimental_cascade_size$drop_ID[t_idx])
+    trial_id <- as.character(trial_id)
     
+    print(trial_id)
     # Calculate cascade sizes for all 3,000 sims in this trial
     sim_sizes <- map_dbl(mod_res[[trial_id]], ~ sum(!is.na(.x[,1])))
     
@@ -234,14 +259,26 @@ write.csv(all_params_results, "sp_coarse_frNA_noK_s3000_cascade_size_sims.csv", 
 out_nll[["task_24.nll"]]
 mod_res_2 <- out_nll[["model_result"]]
 
-mod_res_2 <- out_nll[["model_result"]]
-# Choose your trial (change 1 to whichever trial index you want to inspect)
-trial_idx <- 228
+# SIZE - Choose your trial (change 1 to whichever trial index you want to inspect)
+trial_idx <- 170
 # Extract the cacade size (number of responding eels) for all 3,000 sims
 cascade_sizes <- sapply(mod_res_2[[as.character(trial_idx)]], function(sim_res) {
   sum(!is.na(sim_res[,1]))
 })
 cascade_diff <- cascade_sizes - experimental_cascade_size$n_responders[experimental_cascade_size$drop_ID == trial_idx]
+hist(cascade_diff)
+
+# EXTENT - Choose your trial (change 1 to whichever trial index you want to inspect)
+trial_idx <- 170
+# Extract the cacade size (number of responding eels) for all 3,000 sims
+cascade_extent <- sapply(
+  mod_res_2[[as.character(trial_idx)]],
+  function(sim_res) {
+    x <- sim_res[, 1]
+    if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)
+  }
+)
+cascade_diff <- cascade_extent - experimental_cascade_size$timing_extent[experimental_cascade_size$drop_ID == trial_idx]
 hist(cascade_diff)
 
 chosen_param_results <- all_params_results %>% filter(param_set == 1)
@@ -255,27 +292,136 @@ avg_sim_cascade <- chosen_param_results %>%
   summarise(avg_cascade_diff = mean(cascade_diff), experimental_cascade_size = first(exp_cascade_size), avg_cascade_size = mean(sim_cascade_size))
 
 plot(avg_sim_cascade$experimental_cascade_size, avg_sim_cascade$avg_cascade_diff, xlab = "Actual cascade size", ylab = "Average simulated cascade size - actual cascade size")
-
+abline(0, 0, col = "red", lty = 2)
 plot(avg_sim_cascade$experimental_cascade_size, avg_sim_cascade$avg_cascade_size, xlab = "Actual cascade size", ylab = "Average simulated cascade size")
+abline(0, 1, col = "red", lty = 2)
 
 #who responded the most
+model_result2[["72"]] <- NULL
+drop_ids <- as.numeric(names(model_result2))
+
+all_drops51 <- lapply(seq_along(model_result2), function(i) {
+  
+  drop <- drop_ids[i]
+  modres <- model_result2[[i]]
+  
+  # Calculate cascade timing extent for EACH simulation
+  sim_timing_extent <- sapply(modres, function(sim_res) {
+    
+    rt <- sim_res[, 1]
+    rt <- rt[!is.na(rt)]
+    
+    if (length(rt) < 2) {
+      return(NA_real_)
+    }
+    
+    max(rt) - min(rt)
+  })
+  
+  # Average timing extent across simulations
+  avg_sim_timing_extent <- mean(
+    sim_timing_extent,
+    na.rm = TRUE
+  )
+  
+  # Experimental timing extent
+  responder_data <- subset(data_clean, drop_ID == drop)
+  
+  experimental_timing_extent <- if (
+    first(responder_data$n_responders) == 0
+  ) {
+    NA_real_
+  } else {
+    rt_exp <- responder_data$response_frame_cam1
+    rt_exp <- rt_exp[!is.na(rt_exp)]
+    
+    if (length(rt_exp) < 2) {
+      NA_real_
+    } else {
+      max(rt_exp) - min(rt_exp)
+    }
+  }
+  
+  data.frame(
+    drop_ID = drop,
+    average_sim_timing_extent = avg_sim_timing_extent,
+    experimental_timing_extent = experimental_timing_extent
+  )
+  
+}) %>%
+  bind_rows()
+
+
+x <- all_drops51$experimental_timing_extent
+y <- all_drops51$average_sim_timing_extent
+
+lims <- range(c(x, y), na.rm = TRUE)
+
+plot(
+  x,
+  y,
+  xlab = "Actual cascade timing extent",
+  ylab = "Average simulated cascade timing extent",
+  xlim = lims,
+  ylim = lims
+)
+
+abline(10, 1, col = "black", lty = 1)
+abline(0, 1, col = "red", lty = 2)
+abline(-10, 1, col = "black", lty = 1)
+
+
+
+
 drop2modres <- mod_res_2[[2]]
 d <- sapply(drop2modres, function(sim_identity) {
   #getting proportion of hides
-  #!is.na(sim_identity[,1])
+  !is.na(sim_identity[,1])
   #order of hides
-  sim_identity[,1]
+  #sim_identity[,1]
 })
 
 #sum of hides
 d <- as.data.frame(d)
-d$j <- rowSums(d[2:10000], na.rm=TRUE)/10000
-d[1:10000] <- NULL
+d$j <- rowSums(d[2:3000], na.rm=TRUE)/3000
+d[1:3000] <- NULL
+d <- tibble::rownames_to_column(d, "colony_eel_ID")
+
+responder_data <- subset(data_clean, drop_ID == 2)
+responder_IDs <- responder_data[,c("colony_eel_ID", "binary_response")]
+
+d_responses <- left_join(d, responder_IDs, by = "colony_eel_ID")
+
+plot(all_drops$j, all_drops$binary_response)
+
+all_drops51 %>%
+  #filter(!(drop_ID %in% c(202,208))) %>%
+  group_by(drop_ID) %>%
+  filter(time_lag_since_first > 0) %>%
+  summarise(max_j = max(j, na.rm=TRUE), max_time_lag_since_first = max(time_lag_since_first, na.rm = TRUE)) %>%
+  ggplot(aes(x = max_time_lag_since_first, y = max_j)) +
+  #geom_jitter(height = 0.01, width = 0.01) +
+  geom_point() +
+  geom_smooth() +
+  labs(x = "Experimental cascade length", y = "Max average cascade length")+
+  xlim(0, 200) + 
+  ylim(0, 200)
+
+all_drops51 %>%
+  filter(!(drop_ID %in% c(202,208))) %>%
+  ggplot(aes(x = time_lag_since_first, y =j)) +
+  geom_jitter(height = 0.01, width = 0.01) +
+  geom_smooth() +
+  labs(x = "Proportion of simulations that the individual responded")
+
+
+
+result98 <- summary(glmer(binary_response ~ j + (1|colony_eel_ID) + (1|drop_ID), data=all_drops98, family=binomial()))
 
 #Order of hides
 d <- as.data.frame(d)
-d$j <- rowMeans(d[2:10000], na.rm=TRUE)
-d[1:10000] <- NULL
+d$j <- rowMeans(d[2:3000], na.rm=TRUE)
+d[1:3000] <- NULL
 
 d2 <- data.frame(drop2$eel_ID, drop2$rank_order)
 
@@ -450,5 +596,8 @@ mcmc_areas(clean_samples,
 # 2. Publication-grade Trace Plots
 mcmc_trace(clean_samples, 
            pars = c("ball_decay", "social_decay", "private_thresh", "social_thresh"))
+
+
+
 
          

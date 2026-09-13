@@ -1,6 +1,6 @@
 cd '/Users/ellag/Library/CloudStorage/GoogleDrive-elhe2720@colorado.edu/My Drive/Colorado/PhD/PROJECTS/ball_drop_garden_eel/triangulation/final_triangulation'
 
-coord_filename = "ball_drop_data_3D_trial17_latest.xlsx" %ADD NAME OF BALL DROP FILE WITH 3D COORDS
+coord_filename = "/Users/ellag/Desktop/PhD/academic_projects/eel_diel/data/topology/garden_eel_diel-270525_D1/D2_28-05-25_annotations_3d.xlsx" %ADD NAME OF BALL DROP FILE WITH 3D COORDS
 imgcoordsRC_all = readtable(coord_filename);
 
 total_final =[];

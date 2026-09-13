@@ -10,11 +10,12 @@ hpdi <- function (samp, prob = 0.95) {
   return(ans)
 }
 
-data_no_first <- data %>% filter(rank_order != 1)
+data_no_first <- data_clean_fr_real %>% filter(rank_order != 1)
 data_no_first$rank_order <- data_no_first$rank_order - 1
 
 data_no_first <- data_no_first %>%
   group_by(drop_ID) %>%
+  filter(n_responders > 3) %>%
   mutate(rank_prop = rank_order/(max(rank_order)+1))
 
 
@@ -119,7 +120,7 @@ full_both_spread_model <- brm(formula = rank_prop ~
     prior(normal(0, 1),         class = "Intercept"),
     prior(exponential(1),       class = "sd"),
     prior(gamma(10, 0.5),       class = "phi")),
-    control = list(adapt_delta = 0.99)
+    control = list(adapt_delta = 0.9999)
 )
 
 #Checks
@@ -130,6 +131,7 @@ pp_check(full_both_spread_model, type="dens_overlay",ndraws=500)
 pp_check(full_both_spread_model, type = "stat", stat = "sd")
 pp_check(full_both_spread_model, type = "scatter_avg")
 pp_check(full_both_spread_model, ndraws = 100)
+check_collinearity(full_both_spread_model)
 
 # Model without dist_from_first
 no_social_spread_model <- brm(formula = rank_prop ~ 
@@ -240,47 +242,138 @@ ppd <- posterior_predict(model, newdata = data)
 
 
 
+# Prediction range for distance from first responder
+newd_first <- data.frame(
+  dist_from_first_sc = seq(
+    min(data_no_first$dist_from_first_sc),
+    max(data_no_first$dist_from_first_sc),
+    length.out = 100
+  ),
+  distance_to_ball_sc = 0
+)
 
-newd <- data.frame(dist_from_first_sc = seq(min(data_no_first$dist_from_first_sc), max(data_no_first$dist_from_first_sc), length.out = 100), distance_to_ball_sc = 0)
-pmu <- posterior_epred(full_both_spread_model, newdata = newd, re_formula=NA)
-ppd <- posterior_predict(full_both_spread_model, newdata = newd, re_formula=NA)
-mnmu <- colMeans(pmu)
-n <- ncol(pmu)
-mean_intervals <- data.frame(mulo95=rep(NA,n), muhi95=rep(NA,n))
-for ( i in 1:n ) {
-  mean_intervals[i,] <- hpdi(pmu[,i], prob=0.95)
-}
-prediction_intervals <- predictive_interval(ppd, prob=0.95)
-prediction_intervals <- data.frame(prediction_intervals)
-names(prediction_intervals) <- c("ppdlow95", "ppdhi95")
+# Prediction range for distance to ball
+newd_ball <- data.frame(
+  dist_from_first_sc = 0,
+  distance_to_ball_sc = seq(
+    min(data_no_first$distance_to_ball_sc),
+    max(data_no_first$distance_to_ball_sc),
+    length.out = 100
+  )
+)
 
-preds <- cbind(newd, mnmu, mean_intervals, prediction_intervals)
+# Posterior expected predictions
+pmu_first <- posterior_epred(
+  full_both_spread_model,
+  newdata = newd_first,
+  re_formula = NA
+)
 
+pmu_ball <- posterior_epred(
+  full_both_spread_model,
+  newdata = newd_ball,
+  re_formula = NA
+)
+
+# Posterior means
+newd_first$fit <- colMeans(pmu_first)
+newd_ball$fit <- colMeans(pmu_ball)
+
+# 95% credible intervals
+ci_first <- t(apply(pmu_first, 2, quantile, probs = c(.025, .975)))
+ci_ball  <- t(apply(pmu_ball,  2, quantile, probs = c(.025, .975)))
+
+newd_first$lower <- ci_first[, 1]
+newd_first$upper <- ci_first[, 2]
+
+newd_ball$lower <- ci_ball[, 1]
+newd_ball$upper <- ci_ball[, 2]
+
+# First responder distance
 orig_mean <- attr(data_no_first$dist_from_first_sc, "scaled:center")
 orig_sd   <- attr(data_no_first$dist_from_first_sc, "scaled:scale")
 
-preds$dist_from_first <- preds$dist_from_first_sc * orig_sd + orig_mean
+newd_first$distance <- 
+  newd_first$dist_from_first_sc * orig_sd + orig_mean
 
+
+# Ball distance
 orig_mean <- attr(data_no_first$distance_to_ball_sc, "scaled:center")
 orig_sd   <- attr(data_no_first$distance_to_ball_sc, "scaled:scale")
 
-preds$distance_to_ball <- preds$distance_to_ball_sc * orig_sd + orig_mean
+newd_ball$distance <- 
+  newd_ball$distance_to_ball_sc * orig_sd + orig_mean
 
-#the visualisation is where you "undo" the standardisation for the reader by putting the x-axis back in original units
-preds |> 
-  ggplot() +
-  geom_point(data = data_no_first, 
-             aes(x = dist_from_first, y = rank_prop), 
-             alpha = 0.3, size = 1) +  # fade points back
-  geom_ribbon(aes(x = dist_from_first, ymin = mulo95, ymax = muhi95),  #95% posterior credible intervals (specifically a HPDI), uncertainty around mean 
-              alpha = 0.4, fill = "steelblue") +
-  geom_line(aes(x = dist_from_first, y = mnmu), 
-            linewidth = 1, colour = "steelblue") +
-  geom_line(aes(x = dist_from_first, y = ppdlow95), lty = 2, colour = "grey40") + #prediction intervals, uncertainty aboyt a new observed Y at that X
-  geom_line(aes(x = dist_from_first, y = ppdhi95), lty = 2, colour = "grey40") + #prediction intervals
-  labs(x = "Distance from first eel", 
-       y = "Percentile rank response") +
-  theme_bw()
+preds_first <- newd_first %>%
+  mutate(
+    predictor = "Distance from first responder",
+    distance = dist_from_first_sc * 
+      attr(data_no_first$dist_from_first_sc, "scaled:scale") +
+      attr(data_no_first$dist_from_first_sc, "scaled:center")
+  )
+
+preds_ball <- newd_ball %>%
+  mutate(
+    predictor = "Distance to ball",
+    distance = distance_to_ball_sc *
+      attr(data_no_first$distance_to_ball_sc, "scaled:scale") +
+      attr(data_no_first$distance_to_ball_sc, "scaled:center")
+  )
+
+preds_plot <- bind_rows(preds_first, preds_ball)
+
+data_no_first$drop_ID <- as.factor(data_no_first$drop_ID)
+ggplot() +
+  geom_point(
+    data = data_no_first,
+    aes(x = dist_from_first, y = rank_prop, color = drop_ID),
+    alpha = 0.15
+  ) +
+  geom_ribbon(
+    data = newd_first,
+    aes(x = distance, ymin = lower, ymax = upper),
+    alpha = 0.25,
+    fill = "steelblue"
+  ) +
+  geom_line(
+    data = newd_first,
+    aes(x = distance, y = fit),
+    linewidth = 1.2,
+    colour = "steelblue"
+  ) +
+  labs(
+    x = "Distance from first responder (m)",
+    y = "Predicted percentile rank"
+  ) +
+  theme_bw(base_size = 25)+
+  theme(legend.position="none") 
+
+
+ggplot() +
+  geom_point(
+    data = data_no_first,
+    aes(x = distance_to_ball, y = rank_prop, color = drop_ID),
+    alpha = 0.15
+  ) +
+  geom_ribbon(
+    data = newd_ball,
+    aes(x = distance, ymin = lower, ymax = upper),
+    alpha = 0.25,
+    fill = "red"
+  ) +
+  geom_line(
+    data = newd_ball,
+    aes(x = distance, y = fit),
+    linewidth = 1.2,
+    colour = "red"
+  ) +
+  labs(
+    x = "Distance from ball (m)",
+    y = "Predicted percentile rank"
+  ) +
+  theme_bw(base_size = 25)+
+  theme(legend.position="none") 
+
 
 #reporting coefs unscaled. Spanning 1 is null. 
 full_both_spread_model |>
@@ -1460,8 +1553,73 @@ modcompare <- loo_compare(
 modcompare <- cbind(modcompare, -2*modcompare[,1], 2*modcompare[,2]) #calc LOOIC difference
 colnames(modcompare)[9:10] <- c("looic_diff","se_looic_diff")
 print(modcompare[,c("looic","looic_diff","se_looic_diff")], simplify=FALSE, digits=4)
-write.csv(modcompare, path = "modcompare.csv")
-summary(sr_bayes_liTlB)
+write.csv(as.data.frame(modcompare), "modcompare.csv")
+
+#Collin check
+library(performance)
+library(dplyr)
+library(purrr)
+
+models <- list(
+  gT   = sr_bayes_gT,
+  gV   = sr_bayes_gV,
+  iV   = sr_bayes_iV,
+  iT   = sr_bayes_iT,
+  lgT  = sr_bayes_lgT,
+  liT  = sr_bayes_liT,
+  lM   = sr_bayes_lM,
+  M    = sr_bayes_M,
+  B    = sr_bayes_B,
+  lB   = sr_bayes_lB,
+  gTB  = sr_bayes_gTB,
+  gTlB = sr_bayes_gTlB,
+  gTxB = sr_bayes_gTxB,
+  gTxlB = sr_bayes_gTxlB,
+  gVB  = sr_bayes_gVB,
+  gVlB = sr_bayes_gVlB,
+  gVxB = sr_bayes_gVxB,
+  gVxlB = sr_bayes_gVxlB,
+  iTB  = sr_bayes_iTB,
+  iTxB = sr_bayes_iTxB,
+  iTxlB = sr_bayes_iTxlB,
+  iVB  = sr_bayes_iVB,
+  iVlB = sr_bayes_iVlB,
+  iVxB = sr_bayes_iVxB,
+  iVxlB = sr_bayes_iVxlB,
+  lgTB = sr_bayes_lgTB,
+  lgTlB = sr_bayes_lgTlB,
+  lgTxB = sr_bayes_lgTxB,
+  lgTxlB = sr_bayes_lgTxlB,
+  liTB = sr_bayes_liTB,
+  liTlB = sr_bayes_liTlB,
+  liTxB = sr_bayes_liTxB,
+  liTxlB = sr_bayes_liTxlB,
+  lMB = sr_bayes_lMB,
+  lMlB = sr_bayes_lMlB,
+  lMxB = sr_bayes_lMxB,
+  lMxlB = sr_bayes_lMxlB,
+  MB = sr_bayes_MB,
+  MlB = sr_bayes_MlB,
+  MxB = sr_bayes_MxB,
+  MxlB = sr_bayes_MxlB
+)
+
+collinearity_results <- map(
+  models,
+  ~ performance::check_collinearity(.x)
+)
+collinearity_table <- map2_dfr(
+  collinearity_results,
+  names(collinearity_results),
+  ~ as.data.frame(.x) %>%
+    mutate(model = .y, .before = 1)
+)
+
+collinearity_table
+
+
+
+summary(sr_bayes_liTB)
 
 pp_check(sr_bayes_liTlB, type="dens_overlay",ndraws=100)
 #Data density curve fits within simulations
@@ -1584,9 +1742,9 @@ preds$ball <- exp(preds$log_ball)
 #the visualisation is where you "undo" the standardisation for the reader by putting the x-axis back in original units
 preds |> 
   ggplot() +
-  geom_point(data = initator_responder, 
-             aes(x = inst_topo_dist_from_first, y = second_responder), 
-             alpha = 0.2, size = 1, position = position_jitter(height = 0.01)) +  # fade points back
+  #geom_point(data = initator_responder, 
+   #          aes(x = inst_topo_dist_from_first, y = second_responder), 
+    #         alpha = 0.2, size = 1, position = position_jitter(height = 0.01)) +  # fade points back
   geom_ribbon(aes(x = inst_topo_dist, ymin = mulo95, ymax = muhi95),  #95% posterior credible intervals (specifically a HPDI), uncertainty around mean 
               alpha = 0.4, fill = "steelblue") +
   geom_line(aes(x = inst_topo_dist, y = mnmu), 
@@ -1596,6 +1754,25 @@ preds |>
   labs(x = "Instantaneous topological distance from first eel", 
        y = "Probability of being the second responder") +
   theme_bw()
+
+
+initator_responder %>%
+  filter(second_responder == 1) %>%
+  ggplot(aes(x = inst_topo_dist_from_first)) +
+  geom_histogram(aes(y= stat(count/sum(count))), bins = 20, fill = "#CC79A7") +
+  ylim(0, 0.3) +
+  theme_classic(base_size = 14) +
+  labs(x = "Instantaneous topological distance from first eel", 
+     y = "Density")  
+
+initator_responder %>%
+  filter(second_responder == 0) %>%
+  ggplot(aes(x = inst_topo_dist_from_first)) +
+  geom_histogram(aes(y= stat(count/sum(count))), bins = 20, fill = "#D55E00") +
+  ylim(0, 0.3) +
+  theme_classic(base_size = 14) +
+  labs(x = "Instantaneous topological distance from first eel", 
+       y = "Density")  
 
 newd <- data.frame(log_ball_sc = seq(min(initator_responder$log_ball_sc), max(initator_responder$log_ball_sc), length.out = 100), log_inst_topo_dist_sc = -5.469724e-15)
 pmu <- posterior_epred(sr_bayes_liTlB, newdata = newd, re_formula=NA)
@@ -1630,19 +1807,36 @@ preds$ball <- exp(preds$log_ball)
 
 preds |> 
   ggplot() +
-  geom_point(data = initator_responder, 
-             aes(x = distance_to_ball, y = second_responder), 
-             alpha = 0.2, size = 1, position = position_jitter(height = 0.01)) +  # fade points back
+ # geom_point(data = initator_responder, 
+  #           aes(x = distance_to_ball, y = second_responder), 
+   #          alpha = 0.2, size = 1, position = position_jitter(height = 0.01)) +  # fade points back
   geom_ribbon(aes(x = ball, ymin = mulo95, ymax = muhi95),  #95% posterior credible intervals (specifically a HPDI), uncertainty around mean 
               alpha = 0.4, fill = "steelblue") +
   geom_line(aes(x = ball, y = mnmu), 
             linewidth = 1, colour = "steelblue") +
   #geom_line(aes(x = log_inst_topo_dist, y = ppdlow95), lty = 2, colour = "grey40") + #prediction intervals, uncertainty aboyt a new observed Y at that X
   #geom_line(aes(x = log_inst_topo_dist, y = ppdhi95), lty = 2, colour = "grey40") + #prediction intervals
-  labs(x = "Distance from ball", 
+  labs(x = "Distance from ball (m)", 
        y = "Probability of being the second responder") +
   theme_bw()
 
+initator_responder %>%
+  filter(second_responder == 1) %>%
+  ggplot(aes(x = distance_to_ball)) +
+  geom_histogram(aes( y= stat(count/sum(count))), fill = "#CC79A7", bins = 15) +
+  #ylim(0, 0.15) +
+  theme_classic(base_size = 14) +
+  labs(x = "Distance to ball (m)", 
+       y = "Density")  
+
+initator_responder %>%
+  filter(second_responder == 0) %>%
+  ggplot(aes(x = distance_to_ball)) +
+  geom_histogram(aes( y= stat(count/sum(count))), fill = "#D55E00", bins = 15) +
+  #ylim(0, 0.15) +
+  theme_classic(base_size = 14) +
+  labs(x = "Distance to ball (m)", 
+       y = "Density")  
 
 #uncertainty is small relative to prediction!
 

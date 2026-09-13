@@ -1,94 +1,79 @@
+library(datawizard)
 
-
-cascade_size_nll <- function(par, model, data_clean, initator_responder, coefs, n_sims, fixed, n_time) {
+evaluateHides <- function(sim_trials, coords, initator_responder) {
   
-  model_result <- model(data_clean, initator_responder, par, coefs, n_sims, fixed, n_time)
-  
-  #Calculate log probabilities of cascade size
-  experimental_cascade_size <- data_clean %>%
-    group_by(drop_ID) %>%
-    summarise(n_responders = first(n_responders),
-              timing_extent = ifelse(n_responders == 0, NA, max(response_frame_cam1[!is.na(response_frame_cam1)], na.rm=TRUE) - 
-                                       min(response_frame_cam1[!is.na(response_frame_cam1)], na.rm=TRUE)))
-
-  loglik <- 0
-  
-  for (ii in experimental_cascade_size$drop_ID) {
-    matches <- NULL
-    
-    
-    # Pull the target responder count once before the loop
-    target_responders <- experimental_cascade_size$n_responders[experimental_cascade_size$drop_ID == ii]
-    
-    if (length(target_responders) == 0 || is.na(target_responders)) {
-      next # Skip or set safe default if drop_ID was missing from summary
-    }
-
-    sim_sums <- sapply(model_result[[as.character(ii)]], function(sim_res) sum(!is.na(sim_res[,1])))
-    hits <- sum(sim_sums == target_responders)
-    p_hat <- hits / n_sims
-    p_hat <- max(p_hat, 1/n_sims) # safety floor
-    loglik <- loglik + log(p_hat)
-    
-    
-  }
-  cat("NLL:", -loglik, "\n")
-  flush.console()
-  
-  return(list(
-    nll = -loglik,
-    model_result = model_result))
-  
-}
-
-
-social_private_model <- function(data_clean, initator_responder, params, coefs, n_sims, fixed, n_time) {
-  
-  data <- data_clean
-  n_sims <- n_sims
-  coefs <- coefs
-  n_time <- n_time
-  
-  drop_data_groups <- data_clean %>% 
-    filter(emerged == 1, !is.na(global_X), !is.na(ball_global_X))
-  
-  drop_data_list <- data_clean %>% 
-    filter(emerged == 1, !is.na(global_X), !is.na(ball_global_X)) %>% 
-    split(.$drop_ID) # Natively names the list items by drop_ID
-  
-  orig_topo_mean <- attr(initator_responder$log_inst_topo_dist_sc, "scaled:center")
-  orig_topo_sd   <- attr(initator_responder$log_inst_topo_dist_sc, "scaled:scale")
-  
-  
-  
-  #range <- as.numeric(fixed['range'])
-  #private_threshold <- as.numeric(params['private_threshold'])
-  social_threshold <- as.numeric(params['social_threshold'])
-  ball_decay_time_coef <- as.numeric(params['ball_decay_time_coef'])
-  social_decay_time_coef <- as.numeric(params['social_decay_time_coef'])
-  tr <- as.numeric(fixed['tr']) #30
+  #load
+  orig_topo_mean <- 2.573319
+  orig_topo_sd <- 0.9455378
+  ball_decay_time_coef <- 0 #GET FROM FITTED MOD
+  social_decay_time_coef <- 0.5 #GET FROM FITTED MOD
+  social_threshold <- 12 #GET FROM FITTED MOD
+  fractional_contagion_first <- TRUE #GET FROM FITTED MOD
+  fractional_contagion_subs <- TRUE #GET FROM FITTED MOD
   tb <- 50
   tr <- 30
-  tm <- as.numeric(fixed['tm'])
   tm <- 200
-  fractional_contagion_first <- as.logical(fixed['fractional_contagion_first'])
-  fractional_contagion_subs <- as.logical(fixed['fractional_contagion_subs'])
-  max_rate <- as.numeric(fixed['max_rate'])
-  dt <- as.numeric(fixed['dt'])
-  da <- as.numeric(fixed['da'])
+  max_rate <- 1
+  dt <- 1
+  da <- 1
   
-  social_private_frame_recorder_list <- vector(mode="list", length = length(unique(data$drop_ID)))
-  names(social_private_frame_recorder_list) <- unique(data$drop_ID)
+  coefs <- list() #(all on scaled!)
+  coefs[1] <- -2.56 #fr intercept NA est
+  coefs[2] <- -2.06 #fr log distance from ball NA est
+  coefs[3] <- -4.11 #sr intercept
+  coefs[4] <- -0.64 #sr log inst topo dist
+  coefs[5] <- -0.64 #sr log distance from ball
   
-  for (i in unique(data$drop_ID)) {
+  social_private_frame_recorder_list <- vector(mode="list", length = length(unique(sim_trials$drop_ID)))
+  names(social_private_frame_recorder_list) <- unique(sim_trials$drop_ID)
+  
+  for (i in unique(sim_trials$drop_ID)) {
     
+    n_sims <- 1 #presuming we want 1 sim? could do more though
     social_private_frame_recorder_list[[as.character(i)]] <- vector(mode = "list", length = n_sims)
     
-    #Calculate which individuals are emerged 
-    drop_data <- drop_data_list[[as.character(i)]]
-    if (is.null(drop_data) || nrow(drop_data) == 0) next
+    #extract inst emerged number
+    inst_emerged_count <- sim_trials$inst_emerged_numbers[i]
     
-    drop_eel_IDs <- unique(drop_data$colony_eel_ID)
+    #extract inst emerged IDs
+    drop_eel_IDs <- sample(coords$ID, inst_emerged_count)
+    
+    #compute distances to the ball
+    drop_data <- coords %>%
+      filter(ID %in% drop_eel_IDs)
+    
+    #extract sim info of interest
+    sim_trial_data <- sim_trials[i,]
+    
+    #add in simID
+    drop_data$sim_ID <- i
+    sim_trial_data$sim_ID <- i
+    
+    sim_trial_data <- left_join(drop_data, sim_trial_data, by = "sim_ID")
+    
+    #distance to ball
+    sim_trial_data$distance_to_ball <- sqrt((sim_trial_data$positions_X - sim_trial_data$x_values)^2 + (sim_trial_data$positions_Y - sim_trial_data$y_values)^2 + (sim_trial_data$positions_Z - sim_trial_data$z_values)^2)
+    sim_trial_data$log_distance_to_ball <- log(sqrt((sim_trial_data$positions_X - sim_trial_data$x_values)^2 + (sim_trial_data$positions_Y - sim_trial_data$y_values)^2 + (sim_trial_data$positions_Z - sim_trial_data$z_values)^2))
+    
+    #Instantaneous ranks to each other 
+    for (gg in unique(sim_trial_data$ID)) { #for each eel
+        focal <- gg
+        focal_positions <- NA
+        sim_trial_data_n <- sim_trial_data
+        #calculate others distance to focal
+        sim_trial_data_n$distance_to_focal <- sqrt((sim_trial_data$positions_X - sim_trial_data$positions_X[sim_trial_data$ID == focal])^2 + (sim_trial_data$positions_Y - sim_trial_data$positions_Y[sim_trial_data$ID == focal])^2 + (sim_trial_data$positions_Z - sim_trial_data$positions_Z[sim_trial_data$ID == focal])^2)
+        #calculate others ranked distance to focal
+        sim_trial_data_n$rank <- rank(sim_trial_data_n$distance_to_focal, na.last = "keep", ties.method = "first")
+        #order others by rank
+        sim_trial_data_ranked <- sim_trial_data_n[order(sim_trial_data_n$rank),]
+        #remove self (where distance to focal is 0)
+        sim_trial_data_ranked <- sim_trial_data_ranked[sim_trial_data_ranked$distance_to_focal != 0,]
+        #convert ranked ID list to vector
+        colony_eel_ID_ranked_for_focal <- as.vector(sim_trial_data_ranked$ID)
+        #Insert list
+        sim_trial_data$inst_neighbours_topo_ranked[sim_trial_data$ID == gg] <- list(colony_eel_ID_ranked_for_focal)
+    }
+
     
     if (fractional_contagion_first == TRUE) {
       K_first <- length(drop_eel_IDs)
@@ -108,9 +93,7 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
       social_private_frame_recorder_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = 4, dimnames=list(drop_eel_IDs, NULL))
       
       resp_data <- as.data.frame(matrix(nrow=length(drop_eel_IDs),ncol=4))
-      
-      colony_idx <- which(unique(data$colony) == first(drop_data$colony))
-      
+
       #check if fractional contagion is on
       if (fractional_contagion_subs == TRUE) {
         K <- length(drop_eel_IDs) - 1
@@ -127,10 +110,6 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
       
       #determine first responder
       for (h in 1:length(drop_eel_IDs)) {
-        l_drop_ID <- first(drop_data$drop_ID)
-        l_colony_eel_ID <- drop_data$colony_eel_ID[h]
-        l_date <- first(drop_data$date)
-        l_colony <- first(drop_data$colony)
         #for each eel i in drop j nested in colony k, compute the linear predictor
         eta_j <- as.numeric(coefs[1]) + as.numeric(coefs[2])*(drop_data$log_distance_to_ball_sc[h]) #RE removed for now... + fr_re_drop_ID$"(Intercept)"[fr_re_drop_ID$combo == l_drop_ID] + fr_re_colony_colony_eel_ID$"(Intercept)"[as.character(fr_re_colony_colony_eel_ID$name) == l_colony_eel_ID] + fr_re_date$"(Intercept)"[fr_re_date$combo == l_date] + fr_re_colony$"(Intercept)"[fr_re_colony$combo == l_colony]
         #convert this to a standard logistic transform - gives probability per eel
@@ -220,9 +199,9 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
                 log_inst_topo_dist_sc <- (log(rank) - orig_topo_mean) / orig_topo_sd
                 
                 if (k < tb) {
-                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[jj]) - social_decay_time_coef*log(frames_since_infected) - private_decay_time_coef*log(k)
+                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[jj]) - private_decay_time_coef*log(k) #- social_decay_time_coef*log(frames_since_infected)
                 } else {
-                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc - social_decay_time_coef*log(frames_since_infected)
+                  eta_j <- as.numeric(coefs[3]) #- social_decay_time_coef*log(frames_since_infected)
                 }
                 
                 w_ij <- 1/(1+exp(-eta_j))
@@ -287,6 +266,9 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
   }
   return(social_private_frame_recorder_list)
 }
+  
+    
+    
 
 
 

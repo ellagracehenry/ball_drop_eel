@@ -9,6 +9,17 @@ cascade_size_nll <- function(par, model, data_clean, initator_responder, coefs, 
     group_by(drop_ID) %>%
     summarise(n_responders = first(n_responders))
   
+  experimental_cascade_extent  <- data_clean %>%
+    group_by(drop_ID) %>%
+    summarise(
+      cascade_extent = if (all(is.na(response_frame_cam1))) {
+        NA_real_
+      } else {
+        max(response_frame_cam1, na.rm = TRUE) - min(response_frame_cam1, na.rm = TRUE)
+      },
+      .groups = "drop"
+    )
+  
   #for social private
   
   
