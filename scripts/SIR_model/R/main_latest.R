@@ -112,7 +112,7 @@ n_time <- 200
 
 #METHOD 1: NLL GRID SEARCH
 #Parameter grid 
-param_grids <- expand.grid(social_threshold = seq(5,16,0.1))
+param_grids <- expand.grid(social_threshold = c(1,5,10,15))
 fixed <- expand.grid(tr = c(5), tm = c(4), fractional_contagion_first = c(TRUE), fractional_contagion_subs = c(TRUE), max_rate = max_rate, dt = dt, da = da)
 param_list <- split(param_grids, seq(nrow(param_grids)))
 starting_values <- param_list[[1]]
@@ -135,11 +135,12 @@ testing_data <- data_clean %>%
 drop1_initator_responder <- initator_responder %>% filter(trial_ID %in% c(1))
 
 #Save alp inputs
-write.csv(param_grids, "/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/threshold_decay_size_extent_sweep/social_threshold_ball_decay_time_social_decay_time_extent_noPrivate_noDecay.csv")
-save(data_clean_fr_real, initator_responder, coefs,
-     n_sims, fixed, n_time, file = "SIR_inputs_testing_FullDf.RData")
+write.csv(param_grids, "/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/full_model_cross/updated/social_threshold_modS_test.csv")
+data_clean_f <- data_clean_fr_real
+save(data_clean_f, initator_responder, coefs,
+     n_sims, fixed, n_time, file = "/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/full_model_cross/updated.SIR_inputs_Full-Updated-Df.RData")
 
-n_sims <- 10000
+n_sims <- 3000
 #Fit each model type from same starting vals with maximum likelihood
 cl <- makeCluster(6, outfile = "parallel_log_frNA_noK_fine.txt")     # set the number of processor cores
 setDefaultCluster(cl=cl) # set 'cl' as default cluster
@@ -168,7 +169,7 @@ out_nll <- foreach (i = 1:length(param_list), .combine = 'c') %dopar% {
   starting_values <- param_list[[i]]
   starting_values <- unlist(starting_values)
   
-  res <- cascade_size_time_nll(starting_values, social_private_model, data_clean, initator_responder, coefs, n_sims, fixed, n_time, time_tol)
+  res <- cascade_size_time_nll(starting_values, social_private_model, data_clean, initator_responder, coefs, n_sims, fixed, n_time, time_tol, PRIVATE_ONLY, SOCIAL_ONLY, NULL_MODEL, fractional_contagion_subs)
   
   res
 
@@ -202,7 +203,7 @@ write.csv(results_table, "combined_sweep_results.csv", row.names = FALSE)
 results_table %>% filter(nll == min(nll, na.rm = TRUE))
 
 #Reading in previous full RDS
-out_nll <- readRDS(file = "/Users/ellag/Downloads/result_63_377.443330931615.rds")
+out_nll <- readRDS(file = "/Users/ellag/Downloads/result_2_329.393037827753.rds")
 model_result2 <- out_nll[["model_result"]]
 
 out_nll <- readRDS(file = "/Users/ellag/Downloads/result_51_249.701794211708.rds")
@@ -260,7 +261,7 @@ out_nll[["task_24.nll"]]
 mod_res_2 <- out_nll[["model_result"]]
 
 # SIZE - Choose your trial (change 1 to whichever trial index you want to inspect)
-trial_idx <- 170
+trial_idx <- 2
 # Extract the cacade size (number of responding eels) for all 3,000 sims
 cascade_sizes <- sapply(mod_res_2[[as.character(trial_idx)]], function(sim_res) {
   sum(!is.na(sim_res[,1]))

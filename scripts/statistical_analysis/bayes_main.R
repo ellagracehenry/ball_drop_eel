@@ -369,7 +369,7 @@ ggplot() +
   ) +
   labs(
     x = "Distance from ball (m)",
-    y = "Predicted percentile rank"
+    y = "Percentile rank"
   ) +
   theme_bw(base_size = 25)+
   theme(legend.position="none") 
@@ -1615,11 +1615,11 @@ collinearity_table <- map2_dfr(
     mutate(model = .y, .before = 1)
 )
 
-collinearity_table
+write.csv(as.data.frame(collinearity_table), "collinearity_sr_table.csv")
 
 
-
-summary(sr_bayes_liTB)
+summary(sr_bayes_iTB)
+summary(sr_bayes_liTlB)
 
 pp_check(sr_bayes_liTlB, type="dens_overlay",ndraws=100)
 #Data density curve fits within simulations
@@ -1740,39 +1740,53 @@ preds$log_ball <- preds$log_ball_sc * orig_sd + orig_mean
 preds$ball <- exp(preds$log_ball)
 
 #the visualisation is where you "undo" the standardisation for the reader by putting the x-axis back in original units
-preds |> 
+f1 <- preds |> 
   ggplot() +
   #geom_point(data = initator_responder, 
    #          aes(x = inst_topo_dist_from_first, y = second_responder), 
     #         alpha = 0.2, size = 1, position = position_jitter(height = 0.01)) +  # fade points back
-  geom_ribbon(aes(x = inst_topo_dist, ymin = mulo95, ymax = muhi95),  #95% posterior credible intervals (specifically a HPDI), uncertainty around mean 
-              alpha = 0.4, fill = "steelblue") +
-  geom_line(aes(x = inst_topo_dist, y = mnmu), 
-            linewidth = 1, colour = "steelblue") +
+  geom_ribbon(aes(x = log_inst_topo_dist, ymin = mulo95, ymax = muhi95),  #95% posterior credible intervals (specifically a HPDI), uncertainty around mean 
+              alpha = 0.4, fill = "#660033") +
+  geom_line(aes(x = log_inst_topo_dist, y = mnmu), 
+            linewidth = 1, colour = "#660033") +
   #geom_line(aes(x = log_inst_topo_dist, y = ppdlow95), lty = 2, colour = "grey40") + #prediction intervals, uncertainty aboyt a new observed Y at that X
   #geom_line(aes(x = log_inst_topo_dist, y = ppdhi95), lty = 2, colour = "grey40") + #prediction intervals
-  labs(x = "Instantaneous topological distance from first eel", 
-       y = "Probability of being the second responder") +
-  theme_bw()
+  labs(x = "Inst. topo distance from first responder", 
+       y = "P(i|j)") +
+  coord_cartesian(xlim = c(0, max(initator_responder$log_inst_topo_dist_from_first)), ylim = c(0, 0.6)) +
+  theme_classic(base_size = 20) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank())
 
+ggsave(f1, filename="/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/manuscipt/figures/p_sr_topo.png", width = 8, height = 4)
 
-initator_responder %>%
+f2 <- initator_responder %>%
   filter(second_responder == 1) %>%
   ggplot(aes(x = inst_topo_dist_from_first)) +
-  geom_histogram(aes(y= stat(count/sum(count))), bins = 20, fill = "#CC79A7") +
-  ylim(0, 0.3) +
-  theme_classic(base_size = 14) +
-  labs(x = "Instantaneous topological distance from first eel", 
-     y = "Density")  
+  geom_histogram(binwidth = 2, fill = "#330033") +
+  coord_cartesian(xlim = c(0, max(initator_responder$inst_topo_dist_from_first)), ylim = c(0,28)) +
+  labs(x = "Inst. topo distance from first responder", 
+     y = "Counts")  +
+  theme_classic(base_size = 20) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank())
 
-initator_responder %>%
+ggsave(f2, filename="/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/manuscipt/figures/hist_sr_topo.png", width = 8, height = 2)
+
+
+f3 <- initator_responder %>%
   filter(second_responder == 0) %>%
   ggplot(aes(x = inst_topo_dist_from_first)) +
-  geom_histogram(aes(y= stat(count/sum(count))), bins = 20, fill = "#D55E00") +
-  ylim(0, 0.3) +
+  geom_histogram(binwidth = 2, fill = "#330033") +
+  coord_cartesian(xlim = c(0, max(initator_responder$inst_topo_dist_from_first)), ylim = c(0,300)) +
   theme_classic(base_size = 14) +
-  labs(x = "Instantaneous topological distance from first eel", 
-       y = "Density")  
+  labs(x = "Inst. topo distance from first responder", 
+       y = "Counts")  +
+  theme_classic(base_size = 20) +
+  theme()
+
+ggsave(f3, filename="/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/manuscipt/figures/hist_nsr_topo.png", width = 8, height = 2.5)
+
 
 newd <- data.frame(log_ball_sc = seq(min(initator_responder$log_ball_sc), max(initator_responder$log_ball_sc), length.out = 100), log_inst_topo_dist_sc = -5.469724e-15)
 pmu <- posterior_epred(sr_bayes_liTlB, newdata = newd, re_formula=NA)
@@ -1805,38 +1819,52 @@ preds$log_ball <- preds$log_ball_sc * orig_sd + orig_mean
 # Back-transform from log to raw units
 preds$ball <- exp(preds$log_ball)
 
-preds |> 
+f4 <- preds |> 
   ggplot() +
- # geom_point(data = initator_responder, 
-  #           aes(x = distance_to_ball, y = second_responder), 
-   #          alpha = 0.2, size = 1, position = position_jitter(height = 0.01)) +  # fade points back
+  #geom_point(data = initator_responder, 
+   #          aes(x = distance_to_ball, y = second_responder), 
+    #        alpha = 0.2, size = 1, position = position_jitter(height = 0.01)) +  # fade points back
   geom_ribbon(aes(x = ball, ymin = mulo95, ymax = muhi95),  #95% posterior credible intervals (specifically a HPDI), uncertainty around mean 
-              alpha = 0.4, fill = "steelblue") +
+              alpha = 0.4, fill = "#953300") +
   geom_line(aes(x = ball, y = mnmu), 
-            linewidth = 1, colour = "steelblue") +
+            linewidth = 1, colour = "#953300") +
   #geom_line(aes(x = log_inst_topo_dist, y = ppdlow95), lty = 2, colour = "grey40") + #prediction intervals, uncertainty aboyt a new observed Y at that X
   #geom_line(aes(x = log_inst_topo_dist, y = ppdhi95), lty = 2, colour = "grey40") + #prediction intervals
+  coord_cartesian(xlim = c(0, max(initator_responder$distance_to_ball)), ylim = c(0,0.6)) +
   labs(x = "Distance from ball (m)", 
-       y = "Probability of being the second responder") +
-  theme_bw()
+       y = "P(i|j)") +
+  theme_classic(base_size = 20) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank())
 
-initator_responder %>%
+ggsave(f4, filename="/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/manuscipt/figures/p_sr_ball.png", width = 8, height = 4)
+
+
+f5 <- initator_responder %>%
   filter(second_responder == 1) %>%
   ggplot(aes(x = distance_to_ball)) +
-  geom_histogram(aes( y= stat(count/sum(count))), fill = "#CC79A7", bins = 15) +
-  #ylim(0, 0.15) +
-  theme_classic(base_size = 14) +
+  geom_histogram(aes(y = after_stat(count/sum(count))), fill = "#660000", binwidth = 0.3) +
+  coord_cartesian(xlim = c(min(initator_responder$distance_to_ball), max(initator_responder$distance_to_ball)), ylim = c(0,0.25)) +
   labs(x = "Distance to ball (m)", 
-       y = "Density")  
+       y = "Counts") +
+  theme_classic(base_size = 20) +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank())
 
-initator_responder %>%
+ggsave(f5, filename="/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/manuscipt/figures/hist_sr_ball.png", width = 8, height = 2)
+
+f6 <- initator_responder %>%
   filter(second_responder == 0) %>%
   ggplot(aes(x = distance_to_ball)) +
-  geom_histogram(aes( y= stat(count/sum(count))), fill = "#D55E00", bins = 15) +
-  #ylim(0, 0.15) +
-  theme_classic(base_size = 14) +
+  geom_histogram(aes(y = after_stat(count/sum(count))), fill = "#660000", binwidth = 0.3) +
+  coord_cartesian(xlim = c(min(initator_responder$distance_to_ball), max(initator_responder$distance_to_ball)), ylim = c(0,0.25)) +
   labs(x = "Distance to ball (m)", 
-       y = "Density")  
+       y = "Counts") +
+  theme_classic(base_size = 20) +
+  theme()
+
+ggsave(f6, filename="/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/manuscipt/figures/hist_nsr_ball.png", width = 8, height = 2.5)
+
 
 #uncertainty is small relative to prediction!
 
@@ -1863,7 +1891,7 @@ fr_bayes_lB <- brm(
     (1 | drop_ID) +
     (1 | date),
   
-  data = data,
+  data = data_clean_fr_real,
   family = brms::bernoulli,
   save_pars = save_pars(all = TRUE),
   
@@ -1888,14 +1916,14 @@ pp_check(fr_bayes_lB, type="dens_overlay",ndraws=100)
 summary(sr_bayes_liTlB)
 
 #Subsequent responders NA
-data1 <- data %>% mutate(first_resp_NA_subs = case_when(
+data1 <- data_clean_fr_real %>% mutate(first_resp_NA_subs = case_when(
   technical_first_responder == 1 ~ 1,
   subsequent_responder == 1 ~ NA,
   emerged == 1 ~ 0,
   TRUE ~ NA_real_
 ))
 
-data_clean_f1 <- data_clean_f %>% mutate(first_resp_NA_subs = case_when(
+data_clean_f1 <- data_clean_fr_real %>% mutate(first_resp_NA_subs = case_when(
   technical_first_responder == 1 ~ 1,
   subsequent_responder == 1 ~ NA,
   emerged == 1 ~ 0,
@@ -1936,11 +1964,11 @@ summary(fr_bayes_lB)
 
 #Params (all on scaled!)
 coefs <- list()
-coefs[1] <- -2.93 #fr intercept
-coefs[2] <- -0.73 #fr log distance from ball
-coefs[3] <- -4.11 #sr intercept
-coefs[4] <- -0.64 #sr log inst topo dist
-coefs[5] <- -0.64 #sr log distance from ball
+coefs[1] <- -2.56 #fr intercept
+coefs[2] <- -2.04 #fr log distance from ball
+coefs[3] <- -4.13 #sr intercept
+coefs[4] <- -0.70 #sr log inst topo dist
+coefs[5] <- -0.63 #sr log distance from ball
 
 
 #-0.58
