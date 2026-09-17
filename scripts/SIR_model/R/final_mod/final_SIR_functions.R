@@ -140,8 +140,11 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
       }
       
       #Draw thresholds from a uniform distribution around social threshold
-      theta_max <- 2*social_threshold
-      drop_eel_ID_thresholds <- runif(length(drop_eel_IDs), min = 0, max = theta_max)
+      theta_max_s <- 2*social_threshold
+      drop_eel_ID_social_thresholds <- runif(length(drop_eel_IDs), min = 0, max = theta_max_s)
+      
+      theta_max_p <- 2*private_threshold
+      drop_eel_ID_private_thresholds <- runif(length(drop_eel_IDs), min = 0, max = theta_max_p)
       
       #create state matrix 
       state_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = n_time)
@@ -151,12 +154,19 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
       social_dosage_matrix[,] <- 0
       private_dosage_matrix <- matrix(nrow=length(drop_eel_IDs), ncol = n_time)
       private_dosage_matrix[,] <- 0
+      
+      #infection tracker
+      infection_occurred <- FALSE
     
       #for each time step 
       for (k in 2:n_time) {
         
         #keep last state as a base
         state_matrix[, k] <- state_matrix[, k-1]
+        
+        if (!infection_occurred && any(state_matrix[,k-1] == "i")) {
+          infection_occurred <- TRUE
+        }
         
         #Reset timestep dose to 0
         current_social_doses <- rep(0, length(drop_eel_IDs))
@@ -187,16 +197,16 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
             social_cuml_dose <- sum(social_dosage_matrix[j, window_start:k], na.rm=TRUE)
             norm_social_cuml_dose <- social_cuml_dose/K
             
-            if (norm_social_cuml_dose > drop_eel_ID_thresholds[j]) {
+            if (norm_social_cuml_dose > drop_eel_ID_social_thresholds[j]) {
               social_response <- 1
             } else {
               social_response <- 0 
             }
             
             private_cuml_dose <- sum(private_dosage_matrix[j, window_start:k], na.rm=TRUE)
-            norm_private_cuml_dose <- private_cuml_dose/K
+            norm_private_cuml_dose <- private_cuml_dose
             
-            if (norm_private_cuml_dose > drop_eel_ID_thresholds[j]) {
+            if (norm_private_cuml_dose > drop_eel_ID_private_thresholds[j]) {
               private_response <- 1
             } else {
               private_response <- 0 
@@ -227,7 +237,7 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
                 
                 #evaluate if gets dosed at this step from everything that happened up to k-1
                 #if there are any i at this step, get dosed socially + privately
-                if (any(state_matrix[,k-1] == "i")) {
+                if (PRIVATE_ONLY == FALSE && NULL_MODEL == FALSE && any(state_matrix[,k-1] == "i")) {
                   #get a dose for every infected individual
                   infected_eels_ID <- which(state_matrix[,k-1] == "i")
                   
@@ -241,7 +251,11 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
                     
                     log_inst_topo_dist_sc <- (log(rank) - orig_topo_mean) / orig_topo_sd
                     
+                    if (SOCIAL_ONLY == FALSE) {
                     eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID])
+                    } else {
+                    eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[4])*log_inst_topo_dist_sc
+                    }
                     
                     w_ij <- 1/(1+exp(-eta_j))
                     p_s_dose <- w_ij*max_rate*dt
@@ -253,13 +267,44 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
                     
                 } else { #there are no infecteds present, get dosed privately
                   
-                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID])
-                  
-                  w_ij <- 1/(1+exp(-eta_j))
-                  p_p_dose <- w_ij*max_rate*dt
-                  
-                  if (rbinom(1,1,p_p_dose) == 1) {
-                    current_private_doses[j] <- current_private_doses[j] + da
+                  if (SOCIAL_ONLY == TRUE) {
+                    if (infection_occurred) {
+                      #do nothing
+                    } else {
+                      eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID])
+                      w_ij <- 1/(1+exp(-eta_j))
+                      p_p_dose <- w_ij*max_rate*dt
+                      
+                      if (rbinom(1,1,p_p_dose) == 1) {
+                        current_private_doses[j] <- current_private_doses[j] + da
+                      }
+                    }
+                  } else if (NULL_MODEL == TRUE) { #if in a null model with no one infected
+                    if (infection_occurred) {
+                      eta_j <- as.numeric(coefs[3]) #intercept only when contagion has started
+                      w_ij <- 1/(1+exp(-eta_j))
+                      p_p_dose <- w_ij*max_rate*dt
+                      
+                      if (rbinom(1,1,p_p_dose) == 1) {
+                        current_private_doses[j] <- current_private_doses[j] + da
+                      }
+                    } else {
+                      eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID])
+                      w_ij <- 1/(1+exp(-eta_j))
+                      p_p_dose <- w_ij*max_rate*dt
+                      
+                      if (rbinom(1,1,p_p_dose) == 1) {
+                        current_private_doses[j] <- current_private_doses[j] + da
+                      }
+                    }
+                  } else { #if in private only or full with no infecteds)
+                    eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[drop_data$colony_eel_ID == focal_eel_ID])
+                    w_ij <- 1/(1+exp(-eta_j))
+                    p_p_dose <- w_ij*max_rate*dt
+                    
+                    if (rbinom(1,1,p_p_dose) == 1) {
+                      current_private_doses[j] <- current_private_doses[j] + da
+                    }
                   }
                 }
               } #end of no inf present
@@ -281,76 +326,3 @@ social_private_model <- function(data_clean, initator_responder, params, coefs, 
     
       
             
-            
-            
-            
-            
-            
-            #if we are in a private only model, get dosed for just ball
-            
-            if (PRIVATE_ONLY || NULL_MODEL) {
-              if (PRIVATE_ONLY) {
-                if (k < tb) { #if we are within ball timestep
-                  eta_j <- as.numeric(coefs[3]) + as.numeric(coefs[5])*(drop_data$log_distance_to_ball_sc[j]) - ball_decay_time_coef*k #calculate linear predictor from this rank
-                } else {
-                  eta_j <- as.numeric(coefs[3])
-                }
-              } else if (NULL_MODEL) {
-                eta_j <- as.numeric(coefs[3])
-              } 
-              
-              w_ij <- 1/(1+exp(-eta_j))
-              p_dose <- w_ij*max_rate*dt
-              
-              if (rbinom(1,1,p_dose) == 1) {
-                current_doses[j] <- current_doses[j] + da
-              }
-              
-            }
-            
-          }
-          
-          #put current doses in the dosage matrix for this time step
-          if (state_matrix[j, k-1] == "s") {
-            dosage_matrix[j,k] <- current_doses[j]
-          } else {
-            dosage_matrix[j,k] <- NA
-          }
-          
-          
-          #Phase 2: Accumulation and infection
-          
-          #for each eel
-          for (j in 1:length(drop_eel_IDs)) {
-            
-            focal_eel_ID <- drop_eel_IDs[j]
-            
-            if (state_matrix[j, k-1] == "s") { #if they are suspectible
-              
-              #check for cumulative dosage
-              tm_frames <- round(tm/dt)
-              window_start <- max(1, k-tm_frames)
-              cuml_dose <- sum(dosage_matrix[j, window_start:k], na.rm=TRUE)
-              
-              norm_cuml_dose <- cuml_dose/K #try take out K, see if fits better
-              
-              
-              if (norm_cuml_dose > drop_eel_ID_thresholds[j]) {
-                response <- 1
-              } else {
-                response <- 0 
-              }
-            
-            }
-            
-          }
-        }
-      }
-      social_private_frame_recorder_list[[as.character(i)]][[sim]] <- social_private_frame_recorder_matrix
-    }
-  }
-  return(social_private_frame_recorder_list)
-}
-
-
-
