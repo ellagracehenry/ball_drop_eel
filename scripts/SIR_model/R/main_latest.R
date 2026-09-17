@@ -112,7 +112,7 @@ n_time <- 200
 
 #METHOD 1: NLL GRID SEARCH
 #Parameter grid 
-param_grids <- expand.grid(social_threshold = c(1,5,10,15))
+param_grids <- expand.grid(social_threshold = seq(12.7,16,0.1))
 fixed <- expand.grid(tr = c(5), tm = c(4), fractional_contagion_first = c(TRUE), fractional_contagion_subs = c(TRUE), max_rate = max_rate, dt = dt, da = da)
 param_list <- split(param_grids, seq(nrow(param_grids)))
 starting_values <- param_list[[1]]
@@ -135,7 +135,7 @@ testing_data <- data_clean %>%
 drop1_initator_responder <- initator_responder %>% filter(trial_ID %in% c(1))
 
 #Save alp inputs
-write.csv(param_grids, "/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/full_model_cross/updated/social_threshold_modS_test.csv")
+write.csv(param_grids, "/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/full_model_cross/updated/social_threshold_modP.csv")
 data_clean_f <- data_clean_fr_real
 save(data_clean_f, initator_responder, coefs,
      n_sims, fixed, n_time, file = "/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/full_model_cross/updated.SIR_inputs_Full-Updated-Df.RData")
@@ -203,7 +203,7 @@ write.csv(results_table, "combined_sweep_results.csv", row.names = FALSE)
 results_table %>% filter(nll == min(nll, na.rm = TRUE))
 
 #Reading in previous full RDS
-out_nll <- readRDS(file = "/Users/ellag/Downloads/result_2_329.393037827753.rds")
+out_nll <- readRDS(file = "/Users/ellag/Downloads/result_63_431.069418875707.rds")
 model_result2 <- out_nll[["model_result"]]
 
 out_nll <- readRDS(file = "/Users/ellag/Downloads/result_51_249.701794211708.rds")
