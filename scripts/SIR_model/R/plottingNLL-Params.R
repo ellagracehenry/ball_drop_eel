@@ -1,8 +1,8 @@
 library(ggplot2)
 library(dplyr)
 
-nll <- read.csv("/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/full_model_cross/modSPK_nll.csv", header=FALSE)
-params <- read.csv("/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/full_model_cross/social_threshold_modSK.csv")
+nll <- read.csv("/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/v4/modS_v4.csv", header=FALSE)
+params <- read.csv("/Users/ellag/Desktop/PhD/academic_projects/ball_drop_eel/data/v4/social_private_threshold_sparse.csv")
 
 params <- params[!(params$X %in% c(142,156)),]
 
@@ -19,7 +19,7 @@ ggplot(full, aes(y = V2, x = social_threshold))+ geom_point(size = 3)+facet_grid
 
 ggplot(full, aes(y = V2, x = social_threshold)) + 
   geom_point(size = 3)+
-  #facet_grid(~social_decay_time_coef, scales = "free_x",space = "free")+
+  facet_grid(~private_threshold, scales = "free_x",space = "free")+
   labs(x = "Social threshold", y= "Nll")
 
 #ball decay threshold be less than 2
